@@ -1,0 +1,22 @@
+# Entornos y cache de Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Configuración sensible local
+config.json
+*.local.json
+
+# Artefactos de compilación/release: se generan manualmente
+installer_payload/
+entregable/
+build/
+dist/
+
+# Datos de validación y libros de trabajo
+*.xlsx
+*.xlsm
+
+# Registros locales
+*.log

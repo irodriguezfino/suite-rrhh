@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from datetime import datetime, timedelta
+from pathlib import Path
+
+from core.models import ProcessRequest
+from core.exceptions import ProcessingCancelled
+from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY, ExcelCollector, get_monthly_control_month_label
+from services.fase1_service import Fase1Service
+from services.output_lock import OutputLock
+
+
+class Fase1ServiceTests(unittest.TestCase):
+    def test_requires_input_files(self) -> None:
+        request = ProcessRequest((), datetime.now(), Path("salida.xlsx"), EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY)
+        with self.assertRaisesRegex(ValueError, "al menos un archivo"):
+            Fase1Service().validate(request)
+
+    def test_rejects_future_date(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            input_file = Path(directory) / "entrada.xlsx"
+            input_file.touch()
+            request = ProcessRequest((input_file,), datetime.now() + timedelta(days=1), Path(directory) / "salida.xlsx", EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY)
+            with self.assertRaisesRegex(ValueError, "posterior"):
+                Fase1Service().validate(request)
+
+    def test_monthly_cycle_selects_closing_month(self) -> None:
+        self.assertEqual(get_monthly_control_month_label(datetime(2026, 7, 20).date()), "JULIO")
+        self.assertEqual(get_monthly_control_month_label(datetime(2026, 7, 21).date()), "AGOSTO")
+        self.assertEqual(get_monthly_control_month_label(datetime(2026, 12, 21).date()), "ENERO")
+
+    def test_accepts_valid_request(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            input_file = Path(directory) / "entrada.xlsx"
+            input_file.touch()
+            request = ProcessRequest((input_file,), datetime.now(), Path(directory) / "salida.xlsx", EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_MONTHLY)
+            Fase1Service().validate(request)
+
+    def test_cancelled_run_stops_before_opening_excel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            collector = ExcelCollector(
+                datetime.now(),
+                Path(directory) / "salida.xlsx",
+                max_workers=1,
+                employment_mode=EMPLOYMENT_MODE_ACTIVE,
+                process_mode=PROCESS_MODE_DAILY,
+            )
+            with self.assertRaises(ProcessingCancelled):
+                collector.run([Path(directory) / "no_llega_a_abrirse.xlsx"], should_cancel=lambda: True)
+
+    def test_output_lock_rejects_second_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "salida.xlsx"
+            with OutputLock(output):
+                with self.assertRaisesRegex(RuntimeError, "Ya hay una recopilación"):
+                    with OutputLock(output):
+                        pass
+
+
+if __name__ == "__main__":
+    unittest.main()
