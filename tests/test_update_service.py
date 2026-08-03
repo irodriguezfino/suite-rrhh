@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from core.config import get_excel_password
 from services.update_service import UpdateInfo, UpdateService, _version_key
@@ -28,6 +29,27 @@ class UpdateServiceTests(unittest.TestCase):
                 package_url="https://example.com/update.zip",
                 sha256="a" * 64,
             ))
+
+    def test_manifest_with_utf8_bom_is_accepted(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return (
+                    b'\xef\xbb\xbf{"version":"1.0.2",'
+                    b'"package_url":"https://raw.githubusercontent.com/irodriguezfino/'
+                    b'suite-rrhh/main/updates/Suite_RRHH_update_1.0.2.zip",'
+                    b'"sha256":"' + (b"a" * 64) + b'"}'
+                )
+
+        with patch("services.update_service.urllib.request.urlopen", return_value=Response()):
+            update = UpdateService().check_for_update()
+        self.assertIsNotNone(update)
+        self.assertEqual(update.version, "1.0.2")
 
     def test_excel_password_reads_local_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

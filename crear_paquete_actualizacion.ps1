@@ -45,7 +45,11 @@ try {
         package_url = "https://raw.githubusercontent.com/irodriguezfino/suite-rrhh/main/updates/$packageName"
         sha256 = $sha256
     } | ConvertTo-Json
-    Set-Content -LiteralPath (Join-Path $updates 'update-manifest.json') -Value $manifest -Encoding utf8
+    [System.IO.File]::WriteAllText(
+        (Join-Path $updates 'update-manifest.json'),
+        $manifest,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
     Get-Item -LiteralPath $packagePath, (Join-Path $updates 'update-manifest.json') | Select-Object FullName, Length, LastWriteTime
 }
 finally {

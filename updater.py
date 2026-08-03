@@ -30,7 +30,7 @@ def _message(text: str, title: str = "Suite RRHH - Actualización") -> None:
 def _download_manifest(url: str) -> dict:
     request = urllib.request.Request(url, headers={"User-Agent": "Suite-RRHH-Updater"})
     with urllib.request.urlopen(request, timeout=15) as response:
-        return json.loads(response.read().decode("utf-8"))
+        return json.loads(response.read().decode("utf-8-sig"))
 
 
 def _download_package(url: str, target: Path) -> None:

@@ -35,7 +35,7 @@ class UpdateService:
     def check_for_update(self, timeout_seconds: int = 4) -> UpdateInfo | None:
         request = urllib.request.Request(UPDATE_MANIFEST_URL, headers={"User-Agent": "Suite-RRHH-Updater"})
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read().decode("utf-8-sig"))
 
         info = UpdateInfo(
             version=str(payload["version"]),
