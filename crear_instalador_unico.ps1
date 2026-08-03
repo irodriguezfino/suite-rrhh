@@ -29,9 +29,10 @@ $outputDir = Join-Path $projectRoot 'entregable'
 $outputFile = Join-Path $outputDir 'USB\Instalador_Universal_Suite_RRHH_20_20.exe'
 $runtimeSource = Join-Path $env:TEMP 'RRHH_Installer_Build_Python311'
 $runtimePython = Join-Path $runtimeSource 'python.exe'
+$pythonBootstrap = Join-Path $payload 'python-3.11.9-amd64.exe'
 
 foreach ($required in @(
-    $runtimePython,
+    $pythonBootstrap,
     (Join-Path $payload 'wheels\openpyxl-3.1.5-py2.py3-none-any.whl'),
     (Join-Path $payload 'wheels\pywin32-312-cp311-cp311-win_amd64.whl'),
     (Join-Path $payload 'wheels\pillow-12.3.0-cp311-cp311-win_amd64.whl'),
@@ -42,6 +43,14 @@ foreach ($required in @(
 )) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Falta el archivo requerido: $required"
+    }
+}
+
+if (-not (Test-Path -LiteralPath $runtimePython)) {
+    Write-Host 'Preparando el Python de construccion local...'
+    & $pythonBootstrap /quiet InstallAllUsers=0 PrependPath=0 Include_doc=0 Include_test=0 Include_pip=1 Shortcuts=0 "TargetDir=$runtimeSource"
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $runtimePython)) {
+        throw 'No se pudo preparar el Python de construccion local.'
     }
 }
 
