@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QElapsedTimer, QSettings, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QDate, QElapsedTimer, QLocale, QSettings, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCalendarWidget,
     QDateEdit,
     QFileDialog,
     QFrame,
@@ -40,6 +41,7 @@ class Fase1Page(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("pageSurface")
+        self.setAcceptDrops(True)
         self._thread: QThread | None = None
         self._worker: Fase1Worker | None = None
         self._details: list[str] = []
@@ -136,6 +138,16 @@ class Fase1Page(QWidget):
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDisplayFormat("dd/MM/yyyy")
         self.date_edit.setMaximumDate(QDate.currentDate())
+        calendar = self.date_edit.calendarWidget()
+        calendar.setObjectName("dateCalendar")
+        calendar.setGridVisible(False)
+        calendar.setFirstDayOfWeek(Qt.Monday)
+        calendar.setLocale(QLocale(QLocale.Language.Spanish, QLocale.Country.Spain))
+        calendar.setHorizontalHeaderFormat(QCalendarWidget.HorizontalHeaderFormat.ShortDayNames)
+        calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        calendar.setMinimumSize(348, 300)
+        calendar.setToolTip("Usa las flechas para cambiar de mes y selecciona una fecha.")
+        calendar.setAccessibleName("Calendario de fecha de consulta")
         self.date_edit.setAccessibleName("Fecha de consulta")
         self.date_edit.setAccessibleDescription("Fecha usada para filtrar altas y bajas de trabajadores.")
         self.date_edit.dateChanged.connect(self._update_period_description)
@@ -299,6 +311,20 @@ class Fase1Page(QWidget):
         # orden aqui evita que el pie fijo se interponga en la primera pulsacion
         # de Tab.
         self._configure_tab_order()
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self.file_list.add_files(paths)
+            event.acceptProposedAction()
 
     def _configure_tab_order(self) -> None:
         QWidget.setTabOrder(self.back_button, self.file_list.add_button)

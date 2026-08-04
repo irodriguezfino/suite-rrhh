@@ -55,6 +55,24 @@ def apply_application_style(app) -> None:
         QGroupBox {{ border: 1px solid {COLORS['border']}; border-radius: 10px; margin-top: 12px; padding: 14px; font-weight: 600; color: {COLORS['primary']}; }}
         QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; }}
         QLineEdit, QDateEdit, QPlainTextEdit, QTableWidget {{ background: #FFFFFF; border: 1px solid {COLORS['border']}; border-radius: 7px; padding: 7px; selection-background-color: {COLORS['primary']}; }}
+        QDateEdit::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 32px; background: #EEF3FD; border-left: 1px solid #C8D7F3; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}
+        QDateEdit::drop-down:hover {{ background: #DCE8FF; }}
+        QCalendarWidget#dateCalendar {{ background: #FFFFFF; border: 1px solid #C8D7F3; border-radius: 12px; padding: 6px; }}
+        QCalendarWidget#dateCalendar QWidget {{ background: #FFFFFF; color: {COLORS['text']}; }}
+        QCalendarWidget#dateCalendar QWidget#qt_calendar_navigationbar {{ background: #EEF3FD; border: 0; border-bottom: 1px solid #D5E1F7; border-top-left-radius: 8px; border-top-right-radius: 8px; min-height: 38px; }}
+        QCalendarWidget#dateCalendar QToolButton {{ color: {COLORS['primary']}; background: transparent; border: 0; border-radius: 6px; padding: 6px 8px; font-weight: 700; }}
+        QCalendarWidget#dateCalendar QToolButton:hover {{ background: #DCE8FF; }}
+        QCalendarWidget#dateCalendar QToolButton#qt_calendar_prevmonth, QCalendarWidget#dateCalendar QToolButton#qt_calendar_nextmonth {{ background: #FFFFFF; border: 1px solid #C8D7F3; border-radius: 14px; min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px; padding: 0; }}
+        QCalendarWidget#dateCalendar QToolButton#qt_calendar_prevmonth:hover, QCalendarWidget#dateCalendar QToolButton#qt_calendar_nextmonth:hover {{ background: #DCE8FF; border-color: #8FABE0; }}
+        QCalendarWidget#dateCalendar QToolButton#qt_calendar_monthbutton, QCalendarWidget#dateCalendar QToolButton#qt_calendar_yearbutton {{ font-size: 11pt; color: {COLORS['primary']}; padding: 6px 5px; }}
+        QCalendarWidget#dateCalendar QAbstractItemView {{ background: #FFFFFF; color: {COLORS['text']}; selection-background-color: #2F6FED; selection-color: #FFFFFF; outline: 0; font-size: 10pt; alternate-background-color: #F7F9FD; }}
+        QCalendarWidget#dateCalendar QAbstractItemView::item {{ border-radius: 6px; margin: 2px; padding: 4px; }}
+        QCalendarWidget#dateCalendar QAbstractItemView::item:selected {{ background: #2F6FED; color: #FFFFFF; font-weight: 700; }}
+        QCalendarWidget#dateCalendar QAbstractItemView::item:hover {{ background: #DCE8FF; color: #172033; }}
+        QCalendarWidget#dateCalendar QHeaderView::section {{ background: #FFFFFF; color: #52627A; border: 0; padding: 7px 3px 4px; font-size: 9pt; font-weight: 700; }}
+        QCalendarWidget#dateCalendar QMenu {{ background: #FFFFFF; color: {COLORS['text']}; border: 1px solid {COLORS['border']}; border-radius: 7px; padding: 4px; }}
+        QCalendarWidget#dateCalendar QMenu::item:selected {{ background: #DCE8FF; color: {COLORS['primary']}; border-radius: 4px; }}
+        QCalendarWidget#dateCalendar QSpinBox {{ background: #FFFFFF; color: {COLORS['text']}; border: 1px solid #C8D7F3; border-radius: 6px; padding: 4px 6px; min-width: 74px; }}
         QLineEdit:focus, QDateEdit:focus, QPlainTextEdit:focus, QTableWidget:focus, QPushButton:focus, QToolButton:focus {{ border: 2px solid {COLORS['focus']}; }}
         QPushButton {{ background: #FFFFFF; border: 1px solid {COLORS['border']}; border-radius: 7px; padding: 8px 14px; min-height: 22px; }}
         QPushButton:hover {{ background: #F0F4FB; border-color: #A9BBDD; }}
@@ -87,4 +105,5 @@ def apply_application_style(app) -> None:
         QLabel#statusInfo {{ color: {COLORS['primary']}; background: {COLORS['info_surface']}; border-radius: 6px; padding: 9px; }}
         QLabel#statusSuccess {{ color: {COLORS['success']}; background: #ECFDF3; border-radius: 6px; padding: 9px; }}
         QLabel#statusWarning {{ color: {COLORS['warning']}; background: #FFF7ED; border-radius: 6px; padding: 9px; }}
+        QTableWidget[dropActive="true"] {{ background: #E6EEFF; border: 2px dashed {COLORS['focus']}; }}
     """)

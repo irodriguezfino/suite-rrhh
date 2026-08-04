@@ -7,7 +7,7 @@ from pathlib import Path
 
 from core.models import ProcessRequest
 from core.exceptions import ProcessingCancelled
-from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY, ExcelCollector, get_monthly_control_month_label
+from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY, ExcelCollector, department_abbreviation_from_filename, get_monthly_control_month_label
 from services.fase1_service import Fase1Service
 from services.output_lock import OutputLock
 
@@ -30,6 +30,10 @@ class Fase1ServiceTests(unittest.TestCase):
         self.assertEqual(get_monthly_control_month_label(datetime(2026, 7, 20).date()), "JULIO")
         self.assertEqual(get_monthly_control_month_label(datetime(2026, 7, 21).date()), "AGOSTO")
         self.assertEqual(get_monthly_control_month_label(datetime(2026, 12, 21).date()), "ENERO")
+
+    def test_matanza_parts_keep_ml_and_ms_abbreviations(self) -> None:
+        self.assertEqual(department_abbreviation_from_filename("Parte RT - Matanza Limpia.xlsx"), "ML")
+        self.assertEqual(department_abbreviation_from_filename("Toma de datos MS.xlsx"), "MS")
 
     def test_accepts_valid_request(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

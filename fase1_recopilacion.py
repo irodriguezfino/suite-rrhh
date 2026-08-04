@@ -156,6 +156,16 @@ def department_abbreviation_from_filename(filename: str) -> str:
     stem = Path(filename).stem
     normalized = normalize_department_text(stem)
     compact = normalized.replace(" ", "")
+    # ML y MS deben prevalecer sobre cualquier abreviatura genérica que
+    # aparezca en el nombre comercial del parte (por ejemplo, RT).
+    for department_name, abbreviation in (
+        ("MATANZA LIMPIA", "ML"),
+        ("MATANZA SUCIA", "MS"),
+    ):
+        if normalize_department_text(department_name) in normalized:
+            return abbreviation
+        if abbreviation in normalized.split():
+            return abbreviation
     # Primero coincidencias largas para evitar que L1/L2/L3/L5 coincidan dentro de otros nombres.
     for key in sorted(DEPARTMENT_ABBREVIATIONS, key=len, reverse=True):
         key_norm = normalize_department_text(key)

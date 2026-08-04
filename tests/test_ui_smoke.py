@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QCalendarWidget
+from PySide6.QtCore import QLocale, QMimeData, QPointF, QUrl, Qt
+from PySide6.QtGui import QDropEvent
 from PySide6.QtTest import QTest
 
 from core.models import ProgressUpdate
@@ -84,6 +87,42 @@ class UiSmokeTests(unittest.TestCase):
         self.app.processEvents()
         self.assertIs(self.app.focusWidget(), page.file_list.table)
         window.close()
+
+    def test_control_tempo_accepts_file_explorer_drops(self) -> None:
+        window = MainWindow()
+        page = window.fase1_page
+        self.assertTrue(page.acceptDrops())
+        self.assertTrue(page.file_list.acceptDrops())
+        self.assertTrue(page.file_list.table.acceptDrops())
+        self.assertTrue(page.file_list.table.viewport().acceptDrops())
+        window.close()
+
+    def test_date_calendar_uses_compact_modern_configuration(self) -> None:
+        window = MainWindow()
+        calendar = window.fase1_page.date_edit.calendarWidget()
+        self.assertEqual(calendar.objectName(), "dateCalendar")
+        self.assertFalse(calendar.isGridVisible())
+        self.assertEqual(calendar.firstDayOfWeek(), Qt.Monday)
+        self.assertEqual(calendar.locale().language(), QLocale.Language.Spanish)
+        self.assertEqual(calendar.horizontalHeaderFormat(), QCalendarWidget.HorizontalHeaderFormat.ShortDayNames)
+        self.assertEqual(calendar.verticalHeaderFormat(), QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        self.assertEqual(calendar.minimumWidth(), 348)
+        self.assertEqual(calendar.minimumHeight(), 300)
+        window.close()
+
+    def test_file_explorer_drop_adds_excel_to_control_tempo(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            excel_file = Path(directory) / "parte.xlsx"
+            excel_file.touch()
+            mime_data = QMimeData()
+            mime_data.setUrls([QUrl.fromLocalFile(str(excel_file))])
+            event = QDropEvent(QPointF(0, 0), Qt.CopyAction, mime_data, Qt.LeftButton, Qt.NoModifier)
+            window = MainWindow()
+            page = window.fase1_page
+            page.dropEvent(event)
+            self.assertEqual(page.file_list.files, [excel_file])
+            self.assertTrue(event.isAccepted())
+            window.close()
 
     def test_shortcuts_are_disabled_while_processing(self) -> None:
         window = MainWindow()

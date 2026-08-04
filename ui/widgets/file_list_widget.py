@@ -13,6 +13,9 @@ class FileTable(QTableWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(0, 2, parent)
         self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DropOnly)
         self.setHorizontalHeaderLabels(["Archivo", "Ubicación"])
         self.verticalHeader().setVisible(False)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -24,14 +27,34 @@ class FileTable(QTableWidget):
         self.setAccessibleDescription("Lista de archivos de entrada. Usa Suprimir para quitar el archivo seleccionado.")
 
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls():
+        if self._has_local_urls(event):
             event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:
+        if self._has_local_urls(event):
+            self.setProperty("dropActive", True)
+            self.style().unpolish(self)
+            self.style().polish(self)
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event) -> None:
+        self.setProperty("dropActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().dragLeaveEvent(event)
 
     def dropEvent(self, event) -> None:
         paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        self.setProperty("dropActive", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
         if paths:
             self.files_dropped.emit(paths)
             event.acceptProposedAction()
+
+    @staticmethod
+    def _has_local_urls(event) -> bool:
+        return event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls())
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
@@ -46,6 +69,7 @@ class FileListWidget(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setAcceptDrops(True)
         self._files: list[Path] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -77,6 +101,20 @@ class FileListWidget(QWidget):
 
         self.remove_button.clicked.connect(self.remove_selected)
         self.clear_button.clicked.connect(self.clear)
+
+    def dragEnterEvent(self, event) -> None:
+        if FileTable._has_local_urls(event):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:
+        if FileTable._has_local_urls(event):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        if paths:
+            self.add_files(paths)
+            event.acceptProposedAction()
 
     @property
     def files(self) -> list[Path]:
