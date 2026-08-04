@@ -59,7 +59,7 @@ MONTH_BLOCK_WIDTH_DEFAULT = 15
 DEFAULT_MAX_WORKERS = 2
 MAX_SAFE_WORKERS = 4
 CONTROL_MAX_SCAN_ROW = 2500
-PERSON_REQUIRED_COLUMNS = (8, 10, 11)  # H, J, K: APELLIDOS, NOMBRE y ALTA obligatorios. ALTA debe ser anterior a la fecha elegida
+PERSON_REQUIRED_COLUMNS = (8, 10, 11)  # H, J, K: APELLIDOS, NOMBRE y ALTA obligatorios. ALTA debe ser igual o anterior a la fecha elegida
 EMPLOYMENT_MODE_ACTIVE = "activos"
 EMPLOYMENT_MODE_INACTIVE = "bajas"
 PROCESS_MODE_DAILY = "diario"
@@ -156,21 +156,22 @@ def department_abbreviation_from_filename(filename: str) -> str:
     stem = Path(filename).stem
     normalized = normalize_department_text(stem)
     compact = normalized.replace(" ", "")
-    # ML y MS deben prevalecer sobre cualquier abreviatura genérica que
-    # aparezca en el nombre comercial del parte (por ejemplo, RT).
-    for department_name, abbreviation in (
-        ("MATANZA LIMPIA", "ML"),
-        ("MATANZA SUCIA", "MS"),
-    ):
-        if normalize_department_text(department_name) in normalized:
-            return abbreviation
-        if abbreviation in normalized.split():
-            return abbreviation
+    words = set(normalized.split())
+    # Los nombres pueden contener palabras intermedias (p. ej. "Matanza
+    # Zona Limpia"). Estas dos palabras funcionales determinan el departamento.
+    if "MATANZA" in words and ("LIMPIA" in words or "ML" in words):
+        return "ML"
+    if "MATANZA" in words and ("SUCIA" in words or "MS" in words):
+        return "MS"
+
     # Primero coincidencias largas para evitar que L1/L2/L3/L5 coincidan dentro de otros nombres.
     for key in sorted(DEPARTMENT_ABBREVIATIONS, key=len, reverse=True):
         key_norm = normalize_department_text(key)
         key_compact = key_norm.replace(" ", "")
-        if key_compact in compact or key_norm in normalized:
+        # Los codigos cortos solo son validos como palabra completa: RT no
+        # puede coincidir accidentalmente dentro de "Parte".
+        matches = key_norm in words if len(key_norm) <= 2 else key_compact in compact or key_norm in normalized
+        if matches:
             return DEPARTMENT_ABBREVIATIONS[key]
     return ""
 
@@ -207,6 +208,11 @@ def parse_excel_date(value) -> date | None:
         except Exception:
             pass
     return None
+
+
+def is_hire_date_eligible(alta_date: date | None, selected_date_obj: date) -> bool:
+    """Indica si el alta ya es efectiva en la fecha de consulta."""
+    return alta_date is not None and alta_date <= selected_date_obj
 
 
 def excel_col_letter(col: int) -> str:
@@ -464,7 +470,7 @@ def _find_last_person_row_from_control(control) -> tuple[int, int, list[list[Any
         - columna J: NOMBRE
         - columna K: ALTA
 
-    La inclusion final de activos exige ademas que ALTA sea anterior a la fecha
+    La inclusion final de activos exige ademas que ALTA sea igual o anterior a la fecha
     elegida y que BAJA este vacia o sea posterior a esa fecha. No se usa A:F
     porque puede contener numeracion, tiempos o formulas auxiliares. No se usa
     L para decidir si existe trabajador: solo para decidir si estaba activo en
@@ -710,16 +716,16 @@ def _prepare_and_extract_with_excel(
                 skipped_rows += 1
                 decision = "EXCLUIDO"
                 reason = f"ALTA no interpretable: {alta_value}"
-            elif alta_date >= selected_date_obj:
+            elif not is_hire_date_eligible(alta_date, selected_date_obj):
                 skipped_rows += 1
                 decision = "EXCLUIDO"
-                reason = f"ALTA no anterior a fecha seleccionada: {alta_date.strftime('%d/%m/%Y')} >= {selected_date_obj.strftime('%d/%m/%Y')}"
+                reason = f"ALTA posterior a fecha seleccionada: {alta_date.strftime('%d/%m/%Y')} > {selected_date_obj.strftime('%d/%m/%Y')}"
             elif employment_mode == EMPLOYMENT_MODE_ACTIVE:
                 if is_blank(baja_value):
                     expected_included_rows += 1
                     extracted.append(ExtractedRow(source_name, worker_values, mv, source_row=absolute_row))
                     decision = "INCLUIDO"
-                    reason = "ACTIVO: APELLIDOS+NOMBRE+ALTA OK, ALTA anterior y BAJA vacia"
+                    reason = "ACTIVO: APELLIDOS+NOMBRE+ALTA OK, ALTA igual o anterior y BAJA vacia"
                 elif baja_date and baja_date >= selected_date_obj:
                     expected_included_rows += 1
                     extracted.append(ExtractedRow(source_name, worker_values, mv, source_row=absolute_row))
@@ -771,7 +777,7 @@ def _prepare_and_extract_with_excel(
             "skipped_rows": skipped_rows,
             "skipped_baja_rows": skipped_rows,
             "blank_f_inside_range": blank_f_inside_range,
-            "identity_columns_used": "H:J:K obligatorias (APELLIDOS + NOMBRE + ALTA), ALTA anterior a fecha seleccionada y activos = BAJA vacia o BAJA igual/posterior a fecha",
+            "identity_columns_used": "H:J:K obligatorias (APELLIDOS + NOMBRE + ALTA), ALTA igual o anterior a fecha seleccionada y activos = BAJA vacia o BAJA igual/posterior a fecha",
             "month_start_col": month_start,
             "month_width": month_width,
             "month_positions": "; ".join(f"{label}:{col}" for col, label in month_positions),

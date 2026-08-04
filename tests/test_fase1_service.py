@@ -7,7 +7,7 @@ from pathlib import Path
 
 from core.models import ProcessRequest
 from core.exceptions import ProcessingCancelled
-from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY, ExcelCollector, department_abbreviation_from_filename, get_monthly_control_month_label
+from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY, ExcelCollector, department_abbreviation_from_filename, get_monthly_control_month_label, is_hire_date_eligible
 from services.fase1_service import Fase1Service
 from services.output_lock import OutputLock
 
@@ -34,6 +34,15 @@ class Fase1ServiceTests(unittest.TestCase):
     def test_matanza_parts_keep_ml_and_ms_abbreviations(self) -> None:
         self.assertEqual(department_abbreviation_from_filename("Parte RT - Matanza Limpia.xlsx"), "ML")
         self.assertEqual(department_abbreviation_from_filename("Toma de datos MS.xlsx"), "MS")
+        self.assertEqual(department_abbreviation_from_filename("ParteMensual_Matanza_Zona_Limpia_2026.xlsx"), "ML")
+        self.assertEqual(department_abbreviation_from_filename("ParteMensual_Matanza_Zona_Sucia_2026.xlsx"), "MS")
+        self.assertEqual(department_abbreviation_from_filename("ParteMensual_RT_2026.xlsx"), "RT")
+
+    def test_hire_date_equal_to_selected_date_is_eligible(self) -> None:
+        selected = datetime(2026, 8, 4).date()
+        self.assertTrue(is_hire_date_eligible(selected, selected))
+        self.assertTrue(is_hire_date_eligible(datetime(2026, 8, 3).date(), selected))
+        self.assertFalse(is_hire_date_eligible(datetime(2026, 8, 5).date(), selected))
 
     def test_accepts_valid_request(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
