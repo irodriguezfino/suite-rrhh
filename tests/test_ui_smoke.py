@@ -7,7 +7,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QCalendarWidget
+from PySide6.QtWidgets import QApplication, QCalendarWidget, QToolButton
 from PySide6.QtCore import QLocale, QMimeData, QPointF, QUrl, Qt
 from PySide6.QtGui import QDropEvent
 from PySide6.QtTest import QTest
@@ -122,6 +122,23 @@ class UiSmokeTests(unittest.TestCase):
             page.dropEvent(event)
             self.assertEqual(page.file_list.files, [excel_file])
             self.assertTrue(event.isAccepted())
+            window.close()
+
+    def test_file_list_shows_routes_and_allows_removing_one_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            excel_file = Path(directory) / "parte.xlsx"
+            excel_file.touch()
+            window = MainWindow()
+            file_list = window.fase1_page.file_list
+            file_list.restore_files([excel_file, Path(directory) / "ruta_no_disponible.xlsx"])
+            self.assertEqual(file_list.table.columnCount(), 4)
+            self.assertEqual(file_list.table.rowCount(), 2)
+            self.assertEqual(file_list.table.item(1, 2).text(), "No disponible")
+            row_remove = file_list.table.cellWidget(0, 3)
+            self.assertIsInstance(row_remove, QToolButton)
+            self.assertEqual(row_remove.text(), "×")
+            file_list.remove_path(excel_file)
+            self.assertEqual(file_list.files, [Path(directory) / "ruta_no_disponible.xlsx"])
             window.close()
 
     def test_shortcuts_are_disabled_while_processing(self) -> None:

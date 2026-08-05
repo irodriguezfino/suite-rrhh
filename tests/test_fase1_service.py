@@ -5,8 +5,10 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import openpyxl
+
 from core.models import ProcessRequest
-from core.exceptions import ProcessingCancelled
+from core.exceptions import BatchProcessingError, ProcessingCancelled
 from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY, ExcelCollector, department_abbreviation_from_filename, get_monthly_control_month_label, is_hire_date_eligible
 from services.fase1_service import Fase1Service
 from services.output_lock import OutputLock
@@ -50,6 +52,24 @@ class Fase1ServiceTests(unittest.TestCase):
             input_file.touch()
             request = ProcessRequest((input_file,), datetime.now(), Path(directory) / "salida.xlsx", EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_MONTHLY)
             Fase1Service().validate(request)
+
+    def test_monthly_preflight_identifies_missing_required_sheets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            input_file = Path(directory) / "parte_incompleto.xlsx"
+            workbook = openpyxl.Workbook()
+            workbook.active.title = "Julio"
+            workbook.create_sheet("Control 20_20")
+            workbook.save(input_file)
+            workbook.close()
+            request = ProcessRequest(
+                (input_file,),
+                datetime(2026, 7, 29),
+                Path(directory) / "salida.xlsx",
+                EMPLOYMENT_MODE_ACTIVE,
+                PROCESS_MODE_MONTHLY,
+            )
+            with self.assertRaisesRegex(BatchProcessingError, "Agosto"):
+                Fase1Service().preflight_sources(request)
 
     def test_cancelled_run_stops_before_opening_excel(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

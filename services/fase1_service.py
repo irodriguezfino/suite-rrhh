@@ -7,14 +7,23 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
+import openpyxl
+
+from core.exceptions import BatchProcessingError
 from core.models import ProcessRequest, ProcessResult, ProgressUpdate
+from services.diagnostics import RunDiagnostics
 from services.output_lock import OutputLock
 from fase1_recopilacion import (
     EMPLOYMENT_MODE_ACTIVE,
     EMPLOYMENT_MODE_INACTIVE,
     PROCESS_MODE_DAILY,
     PROCESS_MODE_MONTHLY,
+    CONTROL_SHEET,
     ExcelCollector,
+    MONTHLY_CONTROL_SHEET,
+    MONTH_SHEETS,
+    get_next_month,
+    get_previous_month,
 )
 
 ProgressListener = Callable[[ProgressUpdate], None]
@@ -39,6 +48,44 @@ class Fase1Service:
         if request.output_path.suffix.lower() != ".xlsx":
             raise ValueError("El archivo de salida debe tener extensión .xlsx.")
 
+    def preflight_sources(self, request: ProcessRequest) -> None:
+        """Verifica que todos los partes pueden usarse antes de iniciar Excel en paralelo."""
+        required_sheets = self._required_sheets(request)
+        failures: list[tuple[str, str]] = []
+        for path in request.input_files:
+            source = Path(path)
+            try:
+                workbook = openpyxl.load_workbook(
+                    source,
+                    read_only=True,
+                    data_only=False,
+                    keep_vba=source.suffix.lower() == ".xlsm",
+                )
+                try:
+                    available = {name.casefold() for name in workbook.sheetnames}
+                finally:
+                    workbook.close()
+                missing = [sheet for sheet in required_sheets if sheet.casefold() not in available]
+                if missing:
+                    failures.append((source.name, f"faltan las hojas requeridas: {', '.join(missing)}"))
+            except Exception as exc:
+                failures.append((source.name, f"no se puede abrir o validar el libro: {exc}"))
+        if failures:
+            raise BatchProcessingError(failures)
+
+    @staticmethod
+    def _required_sheets(request: ProcessRequest) -> tuple[str, ...]:
+        selected = request.selected_date.date()
+        selected_sheet = MONTH_SHEETS[selected.month - 1]
+        if request.process_mode == PROCESS_MODE_DAILY:
+            return (selected_sheet, CONTROL_SHEET)
+        previous_year, previous_month = get_previous_month(selected.year, selected.month)
+        _next_year, next_month = get_next_month(selected.year, selected.month)
+        required = [MONTH_SHEETS[previous_month - 1], selected_sheet, MONTHLY_CONTROL_SHEET]
+        if selected.day >= 21:
+            required.append(MONTH_SHEETS[next_month - 1])
+        return tuple(dict.fromkeys(required))
+
     def run(
         self,
         request: ProcessRequest,
@@ -47,11 +94,20 @@ class Fase1Service:
     ) -> ProcessResult:
         self.validate(request)
         start = time.perf_counter()
+        diagnostics = RunDiagnostics("control_tempo")
+        diagnostics.record(
+            "run_started",
+            process_mode=request.process_mode,
+            selected_date=request.selected_date.isoformat(),
+            output_path=str(request.output_path),
+            input_files=[str(path) for path in request.input_files],
+        )
         completed_units = 0
         total_units = max(len(request.input_files) * 9 + 1, 1)
 
         def emit(payload: dict) -> None:
             nonlocal completed_units, total_units
+            diagnostics.record("progress", payload=payload)
             total_units = int(payload.get("total_units", total_units) or total_units)
             completed_units = min(total_units, completed_units + int(payload.get("progress_units", 0) or 0))
             if payload.get("event") == "file_completed":
@@ -71,21 +127,27 @@ class Fase1Service:
                     technical=dict(payload),
                 ))
 
-        with OutputLock(request.output_path):
-            collector = ExcelCollector(
-                request.selected_date,
-                request.output_path,
-                max_workers="auto",
-                employment_mode=request.employment_mode,
-                process_mode=request.process_mode,
-            )
-            collector.run(list(request.input_files), progress_callback=emit, should_cancel=should_cancel)
+        try:
+            self.preflight_sources(request)
+            with OutputLock(request.output_path):
+                collector = ExcelCollector(
+                    request.selected_date,
+                    request.output_path,
+                    max_workers="auto",
+                    employment_mode=request.employment_mode,
+                    process_mode=request.process_mode,
+                )
+                collector.run(list(request.input_files), progress_callback=emit, should_cancel=should_cancel)
+        except Exception as exc:
+            diagnostics.record_exception(exc)
+            raise
 
         detail_lines = [
             "RESUMEN FINAL",
             f"Archivo generado: {request.output_path}",
             f"Trabajadores exportados: {len(collector.rows)}",
             f"Tiempo total: {time.perf_counter() - start:.1f}s",
+            f"Registro técnico: {diagnostics.path}",
             "Detalle por archivo:",
         ]
         for result in collector.results:

@@ -20,6 +20,7 @@ Resumen:
 from __future__ import annotations
 
 import calendar
+import gc
 import os
 import queue
 import shutil
@@ -27,6 +28,7 @@ import tempfile
 import time
 import sys
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from datetime import datetime, date, timedelta
 from multiprocessing import Manager, freeze_support
@@ -34,7 +36,7 @@ from pathlib import Path
 from typing import Callable, Any
 
 from core.config import get_excel_password
-from core.exceptions import ProcessingCancelled
+from core.exceptions import BatchProcessingError, OutputInUseError, ProcessingCancelled
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
@@ -110,6 +112,9 @@ def is_parallel_available() -> bool:
 # En datos sensibles prima la integridad. Esta opcion fuerza un recalculo completo
 # del libro tras limpiar el dia/mes, que es mas fiel al proceso manual.
 STRICT_FULL_RECALCULATION = True
+NETWORK_COPY_ATTEMPTS = 3
+NETWORK_COPY_RETRY_SECONDS = 0.75
+CALCULATION_TIMEOUT_SECONDS = 90
 
 ProgressCallback = Callable[[dict], None]
 CancellationCheck = Callable[[], bool]
@@ -119,6 +124,43 @@ def _raise_if_cancelled(should_cancel: CancellationCheck | None) -> None:
     """Detiene el procesamiento en un punto seguro si se solicito cancelar."""
     if should_cancel and should_cancel():
         raise ProcessingCancelled("Cancelación solicitada por el usuario.")
+
+
+def _copy_source_file_safely(source: Path, destination: Path, should_cancel: CancellationCheck | None = None) -> None:
+    """Copia un parte a temporal comprobando que una ruta de red no cambió durante la copia."""
+    last_error: Exception | None = None
+    for attempt in range(1, NETWORK_COPY_ATTEMPTS + 1):
+        _raise_if_cancelled(should_cancel)
+        try:
+            before = source.stat()
+            if before.st_size <= 0:
+                raise RuntimeError("el archivo está vacío")
+            partial = destination.with_suffix(destination.suffix + ".partial")
+            if partial.exists():
+                partial.unlink()
+            shutil.copy2(source, partial)
+            after = source.stat()
+            copied = partial.stat()
+            if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
+                raise RuntimeError("el archivo cambió mientras se copiaba")
+            if copied.st_size != before.st_size:
+                raise RuntimeError("la copia temporal quedó incompleta")
+            os.replace(partial, destination)
+            return
+        except Exception as exc:
+            last_error = exc
+            try:
+                partial = destination.with_suffix(destination.suffix + ".partial")
+                if partial.exists():
+                    partial.unlink()
+            except OSError:
+                pass
+            if attempt < NETWORK_COPY_ATTEMPTS:
+                time.sleep(NETWORK_COPY_RETRY_SECONDS * attempt)
+    raise RuntimeError(
+        f"No se pudo copiar de forma estable el archivo {source}. "
+        f"Comprueba que la ruta de red está disponible y que nadie está guardando el parte. Detalle: {last_error}"
+    ) from last_error
 
 
 def get_recommended_max_workers(file_count: int | None = None) -> int:
@@ -162,6 +204,11 @@ def department_abbreviation_from_filename(filename: str) -> str:
     if "MATANZA" in words and ("LIMPIA" in words or "ML" in words):
         return "ML"
     if "MATANZA" in words and ("SUCIA" in words or "MS" in words):
+        return "MS"
+    # Algunos partes identifican directamente el área con el código ML/MS.
+    if "ML" in words:
+        return "ML"
+    if "MS" in words:
         return "MS"
 
     # Primero coincidencias largas para evitar que L1/L2/L3/L5 coincidan dentro de otros nombres.
@@ -552,6 +599,8 @@ def _prepare_and_extract_with_excel(
     selected_month_label = MONTH_LABELS[selected_month - 1]
     excel = None
     wb = None
+    control = None
+    ws = None
     pythoncom.CoInitialize()
     try:
         _raise_if_cancelled(should_cancel)
@@ -560,6 +609,12 @@ def _prepare_and_extract_with_excel(
         excel.DisplayAlerts = False
         excel.EnableEvents = False
         excel.ScreenUpdating = False
+        excel.Interactive = False
+        try:
+            # Impide que un libro con macros o vínculos externos ejecute código al abrirse.
+            excel.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+        except Exception:
+            pass
         try:
             excel.AskToUpdateLinks = False
         except Exception:
@@ -581,7 +636,14 @@ def _prepare_and_extract_with_excel(
             pass
 
         _emit(progress_queue, "stage", index, source_path, "Abriendo copia temporal con Excel", progress_units=1)
-        wb = excel.Workbooks.Open(str(temp_path), UpdateLinks=0, ReadOnly=False)
+        wb = excel.Workbooks.Open(
+            str(temp_path),
+            UpdateLinks=0,
+            ReadOnly=False,
+            IgnoreReadOnlyRecommended=True,
+            Notify=False,
+            AddToMru=False,
+        )
         _raise_if_cancelled(should_cancel)
 
         if process_mode == PROCESS_MODE_MONTHLY:
@@ -643,15 +705,26 @@ def _prepare_and_extract_with_excel(
         except Exception:
             pass
 
-        # Espera prudente a que Excel termine el calculo. xlDone = 0.
-        for _ in range(240):
+        # Espera a que Excel termine el cálculo. Si no lo hace, no se extraen
+        # datos potencialmente incompletos ni se deja una tarea colgada sin aviso.
+        calculation_finished = False
+        checks = max(1, int(CALCULATION_TIMEOUT_SECONDS / 0.25))
+        for _ in range(checks):
             _raise_if_cancelled(should_cancel)
             try:
                 if excel.CalculationState == 0:
+                    calculation_finished = True
                     break
             except Exception:
+                calculation_finished = True
                 break
             time.sleep(0.25)
+
+        if not calculation_finished:
+            raise TimeoutError(
+                f"Excel no terminó el recálculo de {source_name} en {CALCULATION_TIMEOUT_SECONDS} segundos. "
+                "Revisa fórmulas, vínculos externos o consultas del libro."
+            )
 
         _raise_if_cancelled(should_cancel)
         _emit(progress_queue, "stage", index, source_path, "Localizando bloque mensual y filas de CONTROL", progress_units=1)
@@ -795,6 +868,10 @@ def _prepare_and_extract_with_excel(
         _emit(progress_queue, "audit", index, source_path, "Auditoria OK", rows=len(extracted), expected=expected_included_rows)
         return extracted, worker_headers, month_headers, last_person_row, month_start, month_width, audit, worker_audit_rows
     finally:
+        # Liberar referencias COM antes de cerrar Excel evita procesos EXCEL.EXE
+        # retenidos al procesar lotes grandes de partes.
+        control = None
+        ws = None
         if wb is not None:
             try:
                 wb.Close(SaveChanges=False)
@@ -806,6 +883,9 @@ def _prepare_and_extract_with_excel(
                 excel.Quit()
             except Exception:
                 pass
+        wb = None
+        excel = None
+        gc.collect()
         pythoncom.CoUninitialize()
 
 
@@ -827,7 +907,7 @@ def process_one_file_worker(
     with tempfile.TemporaryDirectory() as tmpdir:
         temp_path = Path(tmpdir) / file_path.name
         _emit(progress_queue, "stage", index, str(file_path), "Copiando archivo a temporal", progress_units=1)
-        shutil.copy2(file_path, temp_path)
+        _copy_source_file_safely(file_path, temp_path, should_cancel)
         _raise_if_cancelled(should_cancel)
 
         rows, worker_headers, month_headers, last_row, month_start, month_width, audit, worker_audit_rows = _prepare_and_extract_with_excel(
@@ -987,6 +1067,7 @@ class ExcelCollector:
         should_cancel: CancellationCheck | None,
     ) -> list[ProcessingResult]:
         results: list[ProcessingResult] = []
+        failures: list[tuple[str, str]] = []
         with Manager() as manager:
             progress_queue = manager.Queue()
             cancellation_event = manager.Event()
@@ -1006,6 +1087,7 @@ class ExcelCollector:
                 }
                 pending = set(future_map.keys())
                 completed_files = 0
+                processed_files = 0
                 cancellation_requested = False
                 while pending:
                     if should_cancel and should_cancel():
@@ -1015,30 +1097,35 @@ class ExcelCollector:
                     self._drain_progress_queue(progress_queue, progress_callback)
                     for future in done:
                         path = future_map[future]
+                        result = None
                         try:
                             result = future.result()
                         except ProcessingCancelled:
                             if cancellation_requested:
                                 continue
                             raise
+                        except BrokenProcessPool as exc:
+                            failures.append((path.name, f"El proceso de Excel terminó inesperadamente: {exc}"))
                         except Exception as exc:
-                            for other in pending:
-                                other.cancel()
-                            raise RuntimeError(f"Error procesando {path.name}: {exc}") from exc
-                        results.append(result)
-                        completed_files += 1
+                            failures.append((path.name, str(exc)))
+                        else:
+                            results.append(result)
+                            completed_files += 1
+                        processed_files += 1
                         if progress_callback:
                             progress_callback({
                                 "event": "file_completed",
                                 "file": path.name,
-                                "completed_files": completed_files,
+                                "completed_files": processed_files,
                                 "total_files": len(files),
-                                "rows": len(result.rows),
+                                "rows": len(result.rows) if result else 0,
                                 "progress_units": 0,
                             })
                 self._drain_progress_queue(progress_queue, progress_callback)
                 if cancellation_requested:
                     raise ProcessingCancelled("Cancelación solicitada por el usuario.")
+        if failures:
+            raise BatchProcessingError(failures)
         return results
 
     @staticmethod
@@ -1136,7 +1223,13 @@ class ExcelCollector:
         temporary_output = Path(temporary_name)
         try:
             out.save(temporary_output)
-            os.replace(temporary_output, self.output_path)
+            try:
+                os.replace(temporary_output, self.output_path)
+            except PermissionError as exc:
+                raise OutputInUseError(
+                    f"No se puede sustituir {self.output_path.name} porque está abierto o bloqueado. "
+                    "Cierra ese Excel y vuelve a intentarlo."
+                ) from exc
         finally:
             if temporary_output.exists():
                 try:

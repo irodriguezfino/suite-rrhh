@@ -4,16 +4,36 @@ from __future__ import annotations
 
 import multiprocessing
 import sys
+import traceback
 
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
+from services.diagnostics import RunDiagnostics
 from ui.main_window import MainWindow
 from ui.theme import apply_application_style
 
 
+def _install_exception_diagnostics() -> None:
+    """Conserva el detalle de excepciones no controladas sin interferir con Qt."""
+    previous_hook = sys.excepthook
+
+    def handle_exception(exc_type, exc_value, exc_traceback) -> None:
+        diagnostics = RunDiagnostics("application")
+        diagnostics.record(
+            "uncaught_exception",
+            exception_type=getattr(exc_type, "__name__", str(exc_type)),
+            error=str(exc_value),
+            traceback="".join(traceback.format_exception(exc_type, exc_value, exc_traceback)),
+        )
+        previous_hook(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = handle_exception
+
+
 def main() -> int:
     multiprocessing.freeze_support()
+    _install_exception_diagnostics()
     app = QApplication(sys.argv)
     app.setApplicationName("Suite RRHH")
     app.setOrganizationName("Grupo Vall")

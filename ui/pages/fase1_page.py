@@ -56,6 +56,7 @@ class Fase1Page(QWidget):
         self._activity_timer.timeout.connect(self._update_elapsed_time)
         self._build_ui()
         self._install_shortcuts()
+        self._restore_last_input_files()
         self._update_form_state()
 
     def _install_shortcuts(self) -> None:
@@ -377,6 +378,19 @@ class Fase1Page(QWidget):
     def _on_files_changed(self, _files: list[Path]) -> None:
         self._update_form_state()
 
+    def _restore_last_input_files(self) -> None:
+        saved_paths = self._settings.value("control_tempo/last_successful_input_files", [])
+        if isinstance(saved_paths, str):
+            saved_paths = [saved_paths]
+        if isinstance(saved_paths, (list, tuple)):
+            self.file_list.restore_files([Path(value) for value in saved_paths if value])
+
+    def _persist_successful_input_files(self) -> None:
+        self._settings.setValue(
+            "control_tempo/last_successful_input_files",
+            [str(path) for path in self.file_list.files],
+        )
+
     def _selected_date(self) -> date:
         return self.date_edit.date().toPython()
 
@@ -407,11 +421,15 @@ class Fase1Page(QWidget):
         if self.is_running:
             return
         output = self._normalise_output_path()
-        ready = bool(self.file_list.files and output)
+        missing_files = [path for path in self.file_list.files if not path.is_file()]
+        ready = bool(self.file_list.files and output and not missing_files)
         self.generate_button.setEnabled(ready)
         if not self.file_list.files:
             self.summary.setText("Añade uno o varios partes Excel para continuar.")
             idle_status = "Añade partes y define la salida para comenzar."
+        elif missing_files:
+            self.summary.setText(f"Hay {len(missing_files)} ruta(s) de entrada no disponible(s). Revisa la red o quítalas de la lista.")
+            idle_status = "No se puede iniciar hasta que todos los archivos de entrada estén disponibles."
         elif not output:
             self.summary.setText("Elige el archivo Excel de salida.")
             idle_status = "La salida todavía no está definida."
@@ -582,6 +600,7 @@ class Fase1Page(QWidget):
 
     def _on_finished(self, result: ProcessResult) -> None:
         self._last_result = result
+        self._persist_successful_input_files()
         self._details.extend(result.detail_lines)
         self.progress.setValue(self.progress.maximum())
         self.progress.setFormat("100%")

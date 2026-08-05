@@ -44,6 +44,7 @@ def apply_application_style(app) -> None:
     palette.setColor(QPalette.Highlight, QColor(COLORS["primary"]))
     palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
     app.setPalette(palette)
+    calendar_chevron = (ASSETS_DIR / "calendar_chevron.svg").as_posix()
     app.setStyleSheet(f"""
         * {{ font-family: 'Segoe UI'; font-size: 11pt; color: {COLORS['text']}; }}
         QMainWindow, QDialog {{ background: {COLORS['background']}; }}
@@ -55,8 +56,9 @@ def apply_application_style(app) -> None:
         QGroupBox {{ border: 1px solid {COLORS['border']}; border-radius: 10px; margin-top: 12px; padding: 14px; font-weight: 600; color: {COLORS['primary']}; }}
         QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; }}
         QLineEdit, QDateEdit, QPlainTextEdit, QTableWidget {{ background: #FFFFFF; border: 1px solid {COLORS['border']}; border-radius: 7px; padding: 7px; selection-background-color: {COLORS['primary']}; }}
-        QDateEdit::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 32px; background: #EEF3FD; border-left: 1px solid #C8D7F3; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}
+        QDateEdit::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 34px; background: #E6EEFF; border-left: 1px solid #C8D7F3; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}
         QDateEdit::drop-down:hover {{ background: #DCE8FF; }}
+        QDateEdit::down-arrow {{ image: url(\"{calendar_chevron}\"); width: 16px; height: 10px; }}
         QCalendarWidget#dateCalendar {{ background: #FFFFFF; border: 1px solid #C8D7F3; border-radius: 12px; padding: 6px; }}
         QCalendarWidget#dateCalendar QWidget {{ background: #FFFFFF; color: {COLORS['text']}; }}
         QCalendarWidget#dateCalendar QWidget#qt_calendar_navigationbar {{ background: #EEF3FD; border: 0; border-bottom: 1px solid #D5E1F7; border-top-left-radius: 8px; border-top-right-radius: 8px; min-height: 38px; }}
@@ -86,6 +88,9 @@ def apply_application_style(app) -> None:
         QToolBar {{ background: #FFFFFF; border: 0; border-bottom: 1px solid {COLORS['border']}; spacing: 6px; padding: 7px; }}
         QToolButton {{ border: 1px solid transparent; border-radius: 6px; padding: 7px 10px; }}
         QToolButton:hover {{ background: #EEF3FD; }}
+        QToolButton#rowRemoveButton {{ color: {COLORS['danger']}; background: #FFF1F1; border: 1px solid #F3C7C7; border-radius: 14px; padding: 0; font-size: 16pt; font-weight: 500; }}
+        QToolButton#rowRemoveButton:hover {{ color: #FFFFFF; background: {COLORS['danger']}; border-color: {COLORS['danger']}; }}
+        QToolButton#rowRemoveButton:pressed {{ background: {COLORS['danger_hover']}; }}
         QLabel#toolbarTitle {{ font-size: 13pt; font-weight: 700; color: {COLORS['primary']}; }}
         QLabel#homeTitle {{ font-size: 25pt; font-weight: 700; color: {COLORS['primary']}; }}
         QLabel#homeHeading {{ font-size: 15pt; font-weight: 700; }}
@@ -106,4 +111,16 @@ def apply_application_style(app) -> None:
         QLabel#statusSuccess {{ color: {COLORS['success']}; background: #ECFDF3; border-radius: 6px; padding: 9px; }}
         QLabel#statusWarning {{ color: {COLORS['warning']}; background: #FFF7ED; border-radius: 6px; padding: 9px; }}
         QTableWidget[dropActive="true"] {{ background: #E6EEFF; border: 2px dashed {COLORS['focus']}; }}
+        QScrollBar:vertical {{ background: transparent; width: 12px; margin: 6px 2px; }}
+        QScrollBar::handle:vertical {{ background: #B8C5DC; min-height: 36px; border: 3px solid transparent; border-radius: 5px; background-clip: padding; }}
+        QScrollBar::handle:vertical:hover {{ background: #7F96BD; }}
+        QScrollBar::handle:vertical:pressed {{ background: {COLORS['primary']}; }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        QScrollBar:horizontal {{ background: transparent; height: 12px; margin: 2px 6px; }}
+        QScrollBar::handle:horizontal {{ background: #B8C5DC; min-width: 36px; border: 3px solid transparent; border-radius: 5px; background-clip: padding; }}
+        QScrollBar::handle:horizontal:hover {{ background: #7F96BD; }}
+        QScrollBar::handle:horizontal:pressed {{ background: {COLORS['primary']}; }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal, QScrollBar::corner {{ background: transparent; }}
     """)
