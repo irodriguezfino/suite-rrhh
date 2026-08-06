@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QCalendarWidget, QToolButton
-from PySide6.QtCore import QLocale, QMimeData, QPointF, QUrl, Qt
+from PySide6.QtCore import QLocale, QMimeData, QPointF, QProcess, QUrl, Qt
 from PySide6.QtGui import QDropEvent
 from PySide6.QtTest import QTest
 
@@ -144,11 +144,11 @@ class UiSmokeTests(unittest.TestCase):
     def test_shortcuts_are_disabled_while_processing(self) -> None:
         window = MainWindow()
         page = window.fase1_page
-        page._thread = object()
+        page._process = object()
         page._set_running(True)
         self.assertFalse(page._shortcut_actions["run"].isEnabled())
         self.assertFalse(page._shortcut_actions["open"].isEnabled())
-        page._thread = None
+        page._process = None
         page._set_running(False)
         window.close()
 
@@ -156,12 +156,16 @@ class UiSmokeTests(unittest.TestCase):
         window = MainWindow()
         page = window.fase1_page
         called = {"request": False}
-        page._thread = object()
+        page._process = object()
         page._build_request = lambda: called.__setitem__("request", True)
         page._start_processing()
         self.assertFalse(called["request"])
-        page._thread = None
+        page._process = None
         window.close()
+
+    def test_isolated_runner_uses_available_qprocess_statuses(self) -> None:
+        self.assertIsNotNone(QProcess.CrashExit)
+        self.assertIsNotNone(QProcess.ProcessError.FailedToStart)
 
 
 if __name__ == "__main__":

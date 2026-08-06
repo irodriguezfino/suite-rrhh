@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import json
+import os
+import sys
+import tempfile
+import traceback
+import uuid
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QDate, QElapsedTimer, QLocale, QSettings, QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QDate, QElapsedTimer, QLocale, QProcess, QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
@@ -30,7 +36,6 @@ from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCE
 from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
 from ui.widgets.file_list_widget import FileListWidget
-from workers.fase1_worker import Fase1Worker
 
 MONTHS = ("ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE")
 
@@ -42,8 +47,14 @@ class Fase1Page(QWidget):
         super().__init__(parent)
         self.setObjectName("pageSurface")
         self.setAcceptDrops(True)
-        self._thread: QThread | None = None
-        self._worker: Fase1Worker | None = None
+        self._process: QProcess | None = None
+        self._run_directory: Path | None = None
+        self._events_file: Path | None = None
+        self._result_file: Path | None = None
+        self._cancel_file: Path | None = None
+        self._event_offset = 0
+        self._runner_failure: tuple[str, str] | None = None
+        self._runner_cancelled = False
         self._details: list[str] = []
         self._last_result: ProcessResult | None = None
         self._completed_files = 0
@@ -54,6 +65,9 @@ class Fase1Page(QWidget):
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(1000)
         self._activity_timer.timeout.connect(self._update_elapsed_time)
+        self._runner_poll_timer = QTimer(self)
+        self._runner_poll_timer.setInterval(150)
+        self._runner_poll_timer.timeout.connect(self._poll_runner_events)
         self._build_ui()
         self._install_shortcuts()
         self._restore_last_input_files()
@@ -77,7 +91,7 @@ class Fase1Page(QWidget):
 
     @property
     def is_running(self) -> bool:
-        return self._thread is not None
+        return self._process is not None
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -525,21 +539,149 @@ class Fase1Page(QWidget):
         self.open_file_button.setVisible(False)
         self.open_folder_button.setVisible(False)
         self._set_running(True)
+        try:
+            self._start_isolated_runner(request)
+        except Exception as exc:
+            self._runner_failure = (str(exc), traceback.format_exc())
+            self._finish_runner()
 
-        self._thread = QThread(self)
-        self._worker = Fase1Worker(request)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.cancelled.connect(self._on_cancelled)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.failed.connect(self._thread.quit)
-        self._worker.cancelled.connect(self._thread.quit)
-        self._thread.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._on_thread_finished)
-        self._thread.start()
+    def _start_isolated_runner(self, request: ProcessRequest) -> None:
+        """Inicia el cálculo en un proceso independiente del proceso PySide6."""
+        run_root = Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "Suite RRHH" / "runs"
+        self._run_directory = run_root / f"control_tempo_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}"
+        self._run_directory.mkdir(parents=True, exist_ok=False)
+        request_file = self._run_directory / "request.json"
+        self._events_file = self._run_directory / "events.jsonl"
+        self._result_file = self._run_directory / "result.json"
+        self._cancel_file = self._run_directory / "cancel.requested"
+        self._event_offset = 0
+        self._runner_failure = None
+        self._runner_cancelled = False
+        request_file.write_text(json.dumps({
+            "input_files": [str(path) for path in request.input_files],
+            "selected_date": request.selected_date.isoformat(),
+            "output_path": str(request.output_path),
+            "employment_mode": request.employment_mode,
+            "process_mode": request.process_mode,
+        }, ensure_ascii=False), encoding="utf-8")
+
+        runner = Path(__file__).resolve().parents[2] / "workers" / "control_tempo_runner.py"
+        runtime = Path(sys.executable)
+        if not runner.is_file():
+            raise RuntimeError("No se encontró el ejecutor aislado de Control Tempo.")
+        if not runtime.is_file():
+            raise RuntimeError("No se encontró el motor Python de Suite RRHH.")
+
+        process = QProcess(self)
+        process.setProgram(str(runtime))
+        process.setArguments([
+            str(runner),
+            "--request-file", str(request_file),
+            "--result-file", str(self._result_file),
+            "--events-file", str(self._events_file),
+            "--cancel-file", str(self._cancel_file),
+        ])
+        process.setWorkingDirectory(str(runner.parent.parent))
+        process.finished.connect(self._on_runner_process_finished)
+        process.errorOccurred.connect(self._on_runner_process_error)
+        self._process = process
+        self._runner_poll_timer.start()
+        process.start()
+
+    def _poll_runner_events(self) -> None:
+        if self._events_file is None or not self._events_file.exists():
+            return
+        try:
+            with self._events_file.open("r", encoding="utf-8") as handle:
+                handle.seek(self._event_offset)
+                lines = handle.readlines()
+                self._event_offset = handle.tell()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            self._handle_runner_event(event)
+
+    def _handle_runner_event(self, event: dict) -> None:
+        event_type = event.get("event")
+        if event_type == "progress":
+            update = event.get("update", {})
+            self._on_progress(ProgressUpdate(
+                event=str(update.get("event", "")),
+                message=str(update.get("message", "")),
+                completed_files=int(update.get("completed_files", 0) or 0),
+                total_files=int(update.get("total_files", self._total_files) or self._total_files),
+                completed_units=int(update.get("completed_units", 0) or 0),
+                total_units=int(update.get("total_units", 1) or 1),
+                rows=int(update.get("rows", 0) or 0),
+                file_name=str(update.get("file_name", "")),
+                technical=dict(update.get("technical", {}) or {}),
+            ))
+        elif event_type == "error":
+            self._runner_failure = (str(event.get("message", "Error en el proceso auxiliar.")), str(event.get("detail", "")))
+        elif event_type == "cancelled":
+            self._runner_cancelled = True
+
+    def _on_runner_process_error(self, error) -> None:
+        if self._process is not None and error == QProcess.ProcessError.FailedToStart:
+            self._runner_failure = (
+                "No se pudo iniciar el proceso aislado de Control Tempo.",
+                self._process.errorString(),
+            )
+            QTimer.singleShot(0, self._finish_runner)
+
+    def _on_runner_process_finished(self, exit_code: int, exit_status) -> None:
+        self._poll_runner_events()
+        if self._process is None:
+            return
+        if exit_status == QProcess.CrashExit and self._runner_failure is None:
+            self._runner_failure = (
+                "El proceso de recopilación se cerró inesperadamente.",
+                "La ventana de Suite RRHH se ha mantenido abierta. "
+                f"Código de salida: {exit_code}. Último registro: {self._run_directory}",
+            )
+        self._finish_runner()
+
+    def _finish_runner(self) -> None:
+        self._poll_runner_events()
+        process = self._process
+        if process is not None:
+            process.deleteLater()
+        self._process = None
+        self._runner_poll_timer.stop()
+        self._set_running(False)
+
+        payload: dict | None = None
+        if self._result_file is not None and self._result_file.exists():
+            try:
+                payload = json.loads(self._result_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                self._runner_failure = ("No se pudo leer el resultado del proceso aislado.", str(exc))
+
+        if payload and payload.get("state") == "success" and self._runner_failure is None:
+            result_data = payload["result"]
+            result = ProcessResult(
+                output_path=Path(result_data["output_path"]),
+                worker_count=int(result_data["worker_count"]),
+                elapsed_seconds=float(result_data["elapsed_seconds"]),
+                detail_lines=tuple(result_data.get("detail_lines", [])),
+                audits=tuple(result_data.get("audits", [])),
+            )
+            self._on_finished(result)
+        elif self._runner_cancelled or (payload and payload.get("state") == "cancelled"):
+            self._on_cancelled()
+        else:
+            if payload and payload.get("state") == "failed":
+                self._runner_failure = (str(payload.get("message", "Error en Control Tempo.")), str(payload.get("detail", "")))
+            message, detail = self._runner_failure or (
+                "El proceso aislado finalizó sin un resultado válido.",
+                f"Registro técnico del proceso: {self._run_directory}",
+            )
+            self._on_failed(message, detail)
+        self.details_button.setEnabled(bool(self._details))
 
     def _set_running(self, running: bool) -> None:
         self.file_list.setEnabled(not running)
@@ -590,9 +732,13 @@ class Fase1Page(QWidget):
         return f"Procesando Excel {current} de {total}."
 
     def _request_cancel(self) -> None:
-        if self._worker is None:
+        if self._cancel_file is None:
             return
-        self._worker.request_cancel()
+        try:
+            self._cancel_file.touch(exist_ok=True)
+        except OSError as exc:
+            self._on_failed("No se pudo solicitar la cancelación.", str(exc))
+            return
         self.cancel_button.setEnabled(False)
         self._set_activity_state("Cancelación solicitada", "activityWarning")
         self._set_status("Cancelación solicitada. Se detendrá al terminar la operación segura actual.", "statusWarning")
@@ -626,12 +772,6 @@ class Fase1Page(QWidget):
         self._stop_activity_timer()
         self._set_activity_state("Cancelado", "activityWarning")
         self._set_status("Proceso cancelado. No se ha generado una salida final.", "statusWarning")
-
-    def _on_thread_finished(self) -> None:
-        self._thread = None
-        self._worker = None
-        self._set_running(False)
-        self.details_button.setEnabled(bool(self._details))
 
     def show_context_help(self) -> None:
         output = self._normalise_output_path()
