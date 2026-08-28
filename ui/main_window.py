@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QS
 from core.app_info import APP_VERSION
 from services.update_service import UpdateService
 from ui.pages.fase1_page import Fase1Page
+from ui.pages.comparador_tempo_page import ComparadorTempoPage
 from ui.pages.home_page import HomePage
 from ui.theme import APP_ICON
 from workers.update_worker import UpdateWorker
@@ -15,24 +16,32 @@ from workers.update_worker import UpdateWorker
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Suite RRHH · Control Tempo")
+        self.setWindowTitle("Suite RRHH")
         self.setMinimumSize(860, 620)
         self.resize(1120, 760)
         if APP_ICON.exists():
             self.setWindowIcon(QIcon(str(APP_ICON)))
 
-        self.stack = QStackedWidget()
+        # Instalar el contenedor antes de crear las páginas evita que Qt tenga
+        # que reparentar QScrollArea ya pobladas al asignarlo como central.
+        # En algunos equipos Windows ese reparentado nativo terminaba en una
+        # violación de acceso al mostrar la ventana principal.
+        self.stack = QStackedWidget(self)
+        self.setCentralWidget(self.stack)
         self._update_thread: QThread | None = None
         self._update_worker: UpdateWorker | None = None
         self.home_page = HomePage()
         self.fase1_page = Fase1Page()
+        self.comparador_page = ComparadorTempoPage()
         self.stack.addWidget(self.home_page)
         self.stack.addWidget(self.fase1_page)
-        self.setCentralWidget(self.stack)
+        self.stack.addWidget(self.comparador_page)
 
         self._build_toolbar()
         self.home_page.open_phase1.connect(self.show_phase1)
+        self.home_page.open_comparador.connect(self.show_comparador)
         self.fase1_page.back_requested.connect(self.show_home)
+        self.comparador_page.back_requested.connect(self.show_home)
         self.show_home()
         QTimer.singleShot(0, self._start_update_check)
 
@@ -60,6 +69,11 @@ class MainWindow(QMainWindow):
         self.control_tempo_action.setShortcut("Alt+1")
         self.control_tempo_action.triggered.connect(self.show_phase1)
         toolbar.addAction(self.control_tempo_action)
+
+        self.comparador_action = QAction("Comparador de Tempo", self)
+        self.comparador_action.setShortcut("Alt+2")
+        self.comparador_action.triggered.connect(self.show_comparador)
+        toolbar.addAction(self.comparador_action)
         toolbar.addSeparator()
 
         help_action = QAction("Ayuda", self)
@@ -73,24 +87,32 @@ class MainWindow(QMainWindow):
         toolbar.addAction(exit_action)
 
     def show_home(self) -> None:
-        if self.stack.currentWidget() is self.fase1_page and not self.fase1_page.request_leave():
+        current = self.stack.currentWidget()
+        if current is self.fase1_page and not self.fase1_page.request_leave():
+            return
+        if current is self.comparador_page and not self.comparador_page.request_leave():
             return
         self.stack.setCurrentWidget(self.home_page)
 
     def show_phase1(self) -> None:
         self.stack.setCurrentWidget(self.fase1_page)
 
+    def show_comparador(self) -> None:
+        self.stack.setCurrentWidget(self.comparador_page)
+
     def show_help(self) -> None:
         if self.stack.currentWidget() is self.fase1_page:
             self.fase1_page.show_context_help()
             return
+        if self.stack.currentWidget() is self.comparador_page:
+            self.comparador_page.show_context_help()
+            return
         QMessageBox.information(
             self,
-            "Ayuda de Control Tempo",
-            "1. Añade los partes Excel.\n"
-            "2. Elige la fecha y el proceso Diario o Mensual 20–20.\n"
-            "3. Define el archivo de salida.\n"
-            "4. Genera el Control Tempo y consulta la auditoría si es necesario.",
+            "Ayuda de Suite RRHH",
+            "Selecciona una herramienta desde Inicio:\n"
+            "• Control Tempo procesa partes Excel.\n"
+            "• Comparador de Tempo contrasta Tempo y SAP por código de trabajador.",
         )
 
     def _start_update_check(self) -> None:
@@ -114,11 +136,11 @@ class MainWindow(QMainWindow):
         self._update_worker = None
 
     def _on_update_available(self, update) -> None:
-        if self.fase1_page.is_running:
+        if self.fase1_page.is_running or self.comparador_page.is_running:
             QMessageBox.information(
                 self,
                 "Actualización disponible",
-                "Hay una actualización disponible, pero Control Tempo está procesando datos. "
+                "Hay una actualización disponible, pero una herramienta está procesando datos. "
                 "Termina o cancela el proceso y vuelve a abrir Suite RRHH para instalarla.",
             )
             return
@@ -141,7 +163,7 @@ class MainWindow(QMainWindow):
         QApplication.instance().quit()
 
     def closeEvent(self, event) -> None:
-        if self.fase1_page.request_leave():
+        if self.fase1_page.request_leave() and self.comparador_page.request_leave():
             event.accept()
         else:
             event.ignore()

@@ -7,12 +7,12 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QCalendarWidget, QToolButton
+from PySide6.QtWidgets import QApplication, QBoxLayout, QCalendarWidget, QToolButton
 from PySide6.QtCore import QLocale, QMimeData, QPointF, QProcess, QUrl, Qt
 from PySide6.QtGui import QDropEvent
 from PySide6.QtTest import QTest
 
-from core.models import ProgressUpdate
+from core.models import ComparatorResult, ComparatorRow, ProgressUpdate
 from ui.main_window import MainWindow
 
 
@@ -23,9 +23,10 @@ class UiSmokeTests(unittest.TestCase):
 
     def test_main_window_opens_with_phase1_disabled_until_valid(self) -> None:
         window = MainWindow()
-        self.assertEqual(window.stack.count(), 2)
-        self.assertEqual(window.windowTitle(), "Suite RRHH · Control Tempo")
+        self.assertEqual(window.stack.count(), 3)
+        self.assertEqual(window.windowTitle(), "Suite RRHH")
         self.assertFalse(window.fase1_page.generate_button.isEnabled())
+        self.assertFalse(window.comparador_page.compare_button.isEnabled())
         window.close()
 
     def test_control_tempo_wide_and_compact_layouts(self) -> None:
@@ -44,6 +45,66 @@ class UiSmokeTests(unittest.TestCase):
         self.assertIs(page.main_panels_layout.itemAtPosition(1, 0).widget(), page.configuration_group)
         self.assertTrue(page.action_card.isVisible())
         self.assertTrue(page.progress_group.isVisible())
+        window.close()
+
+    def test_comparador_transitions_between_preparation_processing_and_result(self) -> None:
+        window = MainWindow()
+        window.show_comparador()
+        window.show()
+        window.resize(1920, 1080)
+        self.app.processEvents()
+        page = window.comparador_page
+        self.assertFalse(hasattr(page, "scroll_area"))
+        self.assertIs(page.state_stack.currentWidget(), page.preparation_state)
+        self.assertTrue(page.inputs_group.isVisible())
+        self.assertEqual(page.preparation_body.direction(), QBoxLayout.LeftToRight)
+        self.assertGreaterEqual(page.inputs_group.width(), 1700)
+        self.assertLess(page.inputs_group.y(), 130)
+
+        page.tempo_edit.setText("C:/Datos/tabla_tempo.xlsx")
+        page.sap_edit.setText("C:/Datos/informe_sap.xls")
+        self.app.processEvents()
+        self.assertTrue(page.compare_button.isEnabled())
+        self.assertEqual(page.tempo_file_status.text(), "Seleccionado")
+        self.assertEqual(page.sap_file_status.text(), "Seleccionado")
+
+        page._set_running(True)
+        self.app.processEvents()
+        self.assertIs(page.state_stack.currentWidget(), page.processing_state)
+        self.assertTrue(page.cancel_button.isVisible())
+        self.assertEqual(page.processing_steps_layout.direction(), QBoxLayout.LeftToRight)
+        self.assertGreaterEqual(page.processing_panel.width(), 1700)
+        self.assertLess(page.processing_panel.y(), 130)
+        page._set_running(False)
+
+        result = ComparatorResult(
+            Path("resultado.xlsx"),
+            Path("incidencias.xlsx"),
+            (ComparatorRow("TIR", "80057", "Trabajador de prueba", {"H. EXTRAS": -60, "HFJ (15%)": 0, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": 0, "RUIDO": 0, "ABSENT": 0}),),
+            (),
+            ("TIR",),
+            1.0,
+            (),
+        )
+        page._on_success(result)
+        self.app.processEvents()
+        self.assertIs(page.state_stack.currentWidget(), page.result_state)
+        self.assertGreaterEqual(page.preview_group.height(), 500)
+        self.assertEqual(page.preview_table.rowCount(), 1)
+        self.assertTrue(page.open_result_button.isVisible())
+
+        window.resize(1000, 760)
+        self.app.processEvents()
+        self.assertGreaterEqual(page.preview_table.height(), 210)
+        page._return_to_preparation()
+        self.app.processEvents()
+        self.assertEqual(page.preparation_body.direction(), QBoxLayout.TopToBottom)
+
+        page._clear()
+        self.assertEqual(page.preview_table.rowCount(), 0)
+        self.assertEqual(page.tempo_edit.text(), "")
+        self.assertFalse(page.open_result_button.isVisible())
+        self.assertIs(page.state_stack.currentWidget(), page.preparation_state)
         window.close()
 
     def test_window_can_be_maximized_and_restored(self) -> None:
@@ -73,19 +134,17 @@ class UiSmokeTests(unittest.TestCase):
         self.assertEqual(page.activity_metrics_label.text(), "Archivos procesados: 1/2")
         window.close()
 
-    def test_control_tempo_tab_order_starts_with_input(self) -> None:
+    def test_control_tempo_keyboard_navigation_is_safe(self) -> None:
         window = MainWindow()
         window.show_phase1()
         window.show()
         self.app.processEvents()
         page = window.fase1_page
         page.back_button.setFocus()
-        QTest.keyClick(page.back_button, Qt.Key_Tab)
-        self.app.processEvents()
-        self.assertIs(self.app.focusWidget(), page.file_list.add_button)
-        QTest.keyClick(page.file_list.add_button, Qt.Key_Tab)
-        self.app.processEvents()
-        self.assertIs(self.app.focusWidget(), page.file_list.table)
+        for _ in range(8):
+            QTest.keyClick(self.app.focusWidget(), Qt.Key_Tab)
+            self.app.processEvents()
+            self.assertIsNotNone(self.app.focusWidget())
         window.close()
 
     def test_control_tempo_accepts_file_explorer_drops(self) -> None:

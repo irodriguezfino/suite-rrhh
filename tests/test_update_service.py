@@ -11,6 +11,11 @@ from services.update_service import UpdateInfo, UpdateService, _version_key
 
 
 class UpdateServiceTests(unittest.TestCase):
+    def test_source_tree_using_installed_runtime_is_not_an_installed_copy(self) -> None:
+        # Una prueba local puede usar el runtime privado sin ser la aplicación
+        # instalada; no debe consultar ni intentar aplicar actualizaciones.
+        self.assertFalse(UpdateService.is_installed_copy())
+
     def test_version_comparison_key(self) -> None:
         self.assertGreater(_version_key("1.10.0"), _version_key("1.2.9"))
         self.assertEqual(_version_key("v1.0.0"), (1, 0, 0))

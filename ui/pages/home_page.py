@@ -9,6 +9,7 @@ from ui.theme import FINURA_LOGO, RODRIGUEZ_LOGO
 
 class HomePage(QWidget):
     open_phase1 = Signal()
+    open_comparador = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -54,4 +55,26 @@ class HomePage(QWidget):
         row.addStretch(1)
         card_layout.addLayout(row)
         layout.addWidget(card)
+
+        comparator_card = QFrame()
+        comparator_card.setObjectName("card")
+        comparator_layout = QVBoxLayout(comparator_card)
+        comparator_layout.setContentsMargins(24, 24, 24, 24)
+        comparator_layout.setSpacing(10)
+        comparator_heading = QLabel("Comparador de Tempo · Contraste con SAP")
+        comparator_heading.setObjectName("homeHeading")
+        comparator_layout.addWidget(comparator_heading)
+        comparator_text = QLabel("Compara acumulados por trabajador y sección, conserva los filtros de Tempo y genera un resultado junto con un Excel independiente de incidencias.")
+        comparator_text.setWordWrap(True)
+        comparator_text.setObjectName("mutedLabel")
+        comparator_layout.addWidget(comparator_text)
+        comparator_row = QHBoxLayout()
+        comparator_button = QPushButton("Abrir Comparador de Tempo")
+        comparator_button.setObjectName("primaryButton")
+        comparator_button.setAccessibleName("Abrir Comparador de Tempo")
+        comparator_button.clicked.connect(self.open_comparador.emit)
+        comparator_row.addWidget(comparator_button)
+        comparator_row.addStretch(1)
+        comparator_layout.addLayout(comparator_row)
+        layout.addWidget(comparator_card)
         layout.addStretch(1)

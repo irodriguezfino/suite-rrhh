@@ -73,5 +73,13 @@ class UpdateService:
 
     @staticmethod
     def is_installed_copy() -> bool:
-        """Evita intentar actualizar una ejecución de desarrollo."""
-        return Path(sys.executable).resolve().parent == (get_install_directory() / "runtime").resolve()
+        """Evita actualizar una ejecución local que reutiliza el runtime instalado.
+
+        Para probar código fuente local se puede usar el ``python.exe`` de la
+        instalación. Mirar solo el ejecutable confundía esa situación con una
+        copia instalada e iniciaba el actualizador en segundo plano.
+        """
+        runtime = (get_install_directory() / "runtime").resolve()
+        installed_app = (get_install_directory() / "app").resolve()
+        source_root = Path(__file__).resolve().parents[1]
+        return Path(sys.executable).resolve().parent == runtime and source_root == installed_app

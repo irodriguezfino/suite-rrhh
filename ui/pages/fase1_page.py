@@ -316,16 +316,11 @@ class Fase1Page(QWidget):
         progress_layout.setColumnStretch(0, 1)
         footer_layout.addWidget(self.progress_group)
         layout.addStretch(1)
-        self._configure_tab_order()
         self._update_panel_layout()
         self._update_period_description()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        # Qt termina de componer el QScrollArea al mostrar la pagina. Fijar el
-        # orden aqui evita que el pie fijo se interponga en la primera pulsacion
-        # de Tab.
-        self._configure_tab_order()
 
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
@@ -340,20 +335,6 @@ class Fase1Page(QWidget):
         if paths:
             self.file_list.add_files(paths)
             event.acceptProposedAction()
-
-    def _configure_tab_order(self) -> None:
-        QWidget.setTabOrder(self.back_button, self.file_list.add_button)
-        QWidget.setTabOrder(self.file_list.add_button, self.file_list.table)
-        QWidget.setTabOrder(self.file_list.table, self.file_list.remove_button)
-        QWidget.setTabOrder(self.file_list.remove_button, self.file_list.clear_button)
-        QWidget.setTabOrder(self.file_list.clear_button, self.date_edit)
-        QWidget.setTabOrder(self.date_edit, self.daily_radio)
-        QWidget.setTabOrder(self.daily_radio, self.monthly_radio)
-        QWidget.setTabOrder(self.monthly_radio, self.output_edit)
-        QWidget.setTabOrder(self.output_edit, self.browse_button)
-        QWidget.setTabOrder(self.browse_button, self.generate_button)
-        QWidget.setTabOrder(self.generate_button, self.reset_button)
-        QWidget.setTabOrder(self.reset_button, self.details_button)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

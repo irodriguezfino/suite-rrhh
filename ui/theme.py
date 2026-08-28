@@ -55,6 +55,15 @@ def apply_application_style(app) -> None:
         QFrame#activityCard {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 10px; }}
         QGroupBox {{ border: 1px solid {COLORS['border']}; border-radius: 10px; margin-top: 12px; padding: 14px; font-weight: 600; color: {COLORS['primary']}; }}
         QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; }}
+        QFrame#comparisonSetupCard, QFrame#comparisonProgressCard, QFrame#resultPreviewCard {{ background: #FFFFFF; border: 1px solid {COLORS['border']}; border-radius: 14px; }}
+        QFrame#comparisonSetupCard {{ min-width: 680px; }}
+        QFrame#preparationIntroPanel {{ background: #F4F7FD; border: 1px solid #DCE5F4; border-radius: 11px; }}
+        QFrame#sourceSelectionPanel {{ background: #FFFFFF; border: 1px solid #D6E0F2; border-radius: 11px; }}
+        QFrame#comparisonSummaryCard {{ background: #FFFFFF; border: 1px solid #D2DDF0; border-radius: 9px; }}
+        QFrame#sourceSelectorCard {{ background: #F8FAFE; border: 1px solid #D6E0F2; border-radius: 11px; }}
+        QFrame#sourceSelectorCard:hover {{ background: #F2F6FE; border-color: #A9BBDD; }}
+        QFrame#sourceContextBar {{ background: #F8FAFE; border: 1px solid {COLORS['border']}; border-radius: 10px; }}
+        QFrame#processingStepsPanel {{ background: #F8FAFE; border: 1px solid #DCE5F4; border-radius: 10px; }}
         QLineEdit, QDateEdit, QPlainTextEdit, QTableWidget {{ background: #FFFFFF; border: 1px solid {COLORS['border']}; border-radius: 7px; padding: 7px; selection-background-color: {COLORS['primary']}; }}
         QDateEdit::drop-down {{ subcontrol-origin: padding; subcontrol-position: top right; width: 34px; background: #E6EEFF; border-left: 1px solid #C8D7F3; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }}
         QDateEdit::drop-down:hover {{ background: #DCE8FF; }}
@@ -101,6 +110,31 @@ def apply_application_style(app) -> None:
         QLabel#pageTitle {{ font-size: 21pt; font-weight: 700; color: {COLORS['text']}; }}
         QLabel#sectionLabel {{ color: {COLORS['primary']}; font-weight: 700; }}
         QLabel#modeBadge {{ color: {COLORS['primary']}; background: #E6EEFF; border-radius: 9px; padding: 5px 9px; font-size: 9pt; font-weight: 700; }}
+        QLabel#stateTitle {{ font-size: 20pt; font-weight: 700; color: {COLORS['text']}; }}
+        QLabel#stateSubtitle {{ color: {COLORS['muted']}; font-size: 11pt; }}
+        QLabel#preparationOutcome {{ color: {COLORS['primary']}; background: #E6EEFF; border-radius: 8px; padding: 10px 12px; }}
+        QLabel#summaryCardTitle {{ color: {COLORS['primary']}; font-weight: 700; }}
+        QLabel#summaryCardText {{ color: {COLORS['text']}; font-size: 10pt; line-height: 1.35; }}
+        QLabel#comparisonStep, QLabel#comparisonStepReady {{ border-radius: 8px; padding: 10px 12px; font-weight: 600; }}
+        QLabel#comparisonStep {{ color: {COLORS['muted']}; background: #F1F4F9; }}
+        QLabel#comparisonStepReady {{ color: {COLORS['primary']}; background: #E6EEFF; }}
+        QLabel#fileTypeBadge {{ color: #FFFFFF; background: #217346; border-radius: 5px; padding: 4px 7px; font-size: 8pt; font-weight: 800; }}
+        QLabel#sourceCardTitle {{ color: {COLORS['primary']}; font-size: 13pt; font-weight: 700; }}
+        QLabel#sourceFileName {{ color: {COLORS['text']}; font-weight: 700; }}
+        QLabel#sourceFileLocation, QLabel#sourceContextText {{ color: {COLORS['muted']}; font-size: 9pt; }}
+        QLabel#processingSourceStrip {{ color: {COLORS['muted']}; background: #F5F7FB; border-radius: 7px; padding: 8px 10px; }}
+        QLabel#processingElapsed {{ color: {COLORS['primary']}; background: #E6EEFF; border-radius: 8px; padding: 6px 9px; font-size: 10pt; font-weight: 700; }}
+        QLabel#fileStatusPending, QLabel#fileStatusReady {{ border-radius: 8px; padding: 4px 8px; font-size: 9pt; font-weight: 700; }}
+        QLabel#fileStatusPending {{ color: {COLORS['muted']}; background: #EFF2F7; }}
+        QLabel#fileStatusReady {{ color: {COLORS['success']}; background: #EAF8F0; }}
+        QLabel#processingStep, QLabel#processingStepActive, QLabel#processingStepDone {{ padding: 7px 0; }}
+        QLabel#processingStep {{ color: {COLORS['muted']}; }}
+        QLabel#processingStepActive {{ color: {COLORS['primary']}; font-weight: 700; }}
+        QLabel#processingStepDone {{ color: {COLORS['success']}; font-weight: 600; }}
+        QLabel#processingStepPending {{ color: {COLORS['muted']}; background: #EFF2F7; border-radius: 8px; padding: 4px 8px; font-size: 9pt; font-weight: 700; }}
+        QLabel#contextTitle {{ color: {COLORS['primary']}; font-weight: 700; }}
+        QLabel#fileContextChip {{ color: {COLORS['text']}; background: #FFFFFF; border: 1px solid #DCE4F1; border-radius: 7px; padding: 5px 8px; }}
+        QLabel#contextMetric {{ color: {COLORS['primary']}; font-weight: 700; }}
         QLabel#summaryLabel {{ color: {COLORS['text']}; padding: 4px 2px; }}
         QLabel#activityPending, QLabel#activityReady, QLabel#activityRunning, QLabel#activitySuccess, QLabel#activityWarning {{ border-radius: 9px; padding: 5px 9px; font-size: 9pt; font-weight: 700; }}
         QLabel#activityPending {{ color: {COLORS['muted']}; background: #EFF2F7; }}
