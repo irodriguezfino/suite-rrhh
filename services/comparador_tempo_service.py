@@ -120,7 +120,7 @@ def _signed_minutes_text(minutes: int) -> str:
 
 
 def _to_minutes(value: object) -> int:
-    """Convierte una hora de Excel/SAP a minutos, redondeando segundos."""
+    """Convierte valores heredados de SAP/XML a minutos, redondeando segundos."""
     if value is None or isinstance(value, bool):
         return 0
     if isinstance(value, timedelta):
@@ -156,6 +156,22 @@ def _to_minutes(value: object) -> int:
     except ValueError:
         return 0
     return sign * int(round(number * 1440 if abs(number) <= 3 else number))
+
+
+def _excel_duration_to_minutes(value: object) -> int:
+    """Convierte una duración procedente de una celda Excel a minutos.
+
+    ``Range.Value2`` devuelve todas las duraciones como días Excel, incluso si
+    el acumulado supera 72 horas. Por ejemplo, 73:10 llega como 3,048611…;
+    nunca debe confundirse con tres minutos.
+    """
+    if value is None or isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        if not math.isfinite(float(value)):
+            return 0
+        return int(round(float(value) * 1440))
+    return _to_minutes(value)
 
 
 def _minutes_as_excel(minutes: int | None) -> float | None:
@@ -487,7 +503,12 @@ class ComparadorTempoService:
             worker = _normalise_text(source[0] if len(source) else "")
             if not worker or _normalise_header(worker).startswith("TOTALGENERAL"):
                 continue
-            values = {column: _to_minutes(source[index] if index < len(source) else 0) for index, column in enumerate(TIME_COLUMNS, start=1)}
+            values = {
+                column: _excel_duration_to_minutes(
+                    source[index] if index < len(source) else 0
+                )
+                for index, column in enumerate(TIME_COLUMNS, start=1)
+            }
             rows.append({"worker": worker, "values": values})
         return rows
 
@@ -574,7 +595,10 @@ class ComparadorTempoService:
                 code, worker = pending
                 record = {
                     "worker": worker,
-                    "values": {field: _to_minutes(values.get(column)) for field, column in headers.items()},
+                    "values": {
+                        field: _excel_duration_to_minutes(values.get(column))
+                        for field, column in headers.items()
+                    },
                     "marking_incidents": tuple(marking_incidents.get(code, ())),
                 }
                 if code in totals:

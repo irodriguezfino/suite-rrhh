@@ -8,7 +8,12 @@ from unittest.mock import patch
 from openpyxl import Workbook, load_workbook
 
 from core.models import ComparatorRequest
-from services.comparador_tempo_service import ComparadorTempoService, _marking_incidence, _to_minutes
+from services.comparador_tempo_service import (
+    ComparadorTempoService,
+    _excel_duration_to_minutes,
+    _marking_incidence,
+    _to_minutes,
+)
 
 
 class ComparadorTempoServiceTests(unittest.TestCase):
@@ -17,6 +22,19 @@ class ComparadorTempoServiceTests(unittest.TestCase):
         self.assertEqual(_to_minutes("16:30"), 990)
         self.assertEqual(_to_minutes("-0:15"), -15)
         self.assertEqual(_to_minutes("�"), 0)
+
+    def test_excel_duration_conversion_keeps_accumulated_hours_over_three_days(self) -> None:
+        self.assertEqual(_excel_duration_to_minutes(3 + 70 / 1440), 4390)
+
+    def test_pivot_reader_keeps_accumulated_hours_over_three_days(self) -> None:
+        rows = ComparadorTempoService._rows_from_pivot([
+            ["Etiquetas de fila", "H. EXTRAS", "HFJ (15%)", "BOLSA (X%)", "NOCTUR", "PENOS", "RUIDO", "ABSENT"],
+            ["APARICIO TORRE PABLO", 70 / 1440, 0, 0, 180 / 1440, 0, 3 + 70 / 1440, 0],
+        ])
+
+        self.assertEqual(rows[0]["values"]["H. EXTRAS"], 70)
+        self.assertEqual(rows[0]["values"]["NOCTUR"], 180)
+        self.assertEqual(rows[0]["values"]["RUIDO"], 4390)
 
     def test_marking_incidence_classification(self) -> None:
         self.assertEqual(_marking_incidence("[55] E 05:23", ""), "Falta fichaje de salida")
@@ -38,7 +56,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             sheet.append(["", "1001 ANA PRUEBA"])
             sheet.append(["", "2026-08-01", None, None, None, None, None, None, "[55] E 05:23", ""])
             sheet.append(["", "1001 ANA PRUEBA"])
-            sheet.append(["", "", 0.5, 0, 0, 0, 0, 8 / 24])
+            sheet.append(["", "", 0.5, 0, 0, 0, 0, 3 + 70 / 1440])
             workbook.save(sap_path)
             workbook.close()
 
@@ -47,7 +65,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertEqual(duplicates, set())
             self.assertEqual(totals["1001"]["worker"], "ANA PRUEBA")
             self.assertEqual(totals["1001"]["values"]["1129-HE15%"], 720)
-            self.assertEqual(totals["1001"]["values"]["Trab. Dia"], 480)
+            self.assertEqual(totals["1001"]["values"]["Trab. Dia"], 4390)
             self.assertEqual(totals["1001"]["marking_incidents"], ("Falta fichaje de salida",))
 
     def test_comparison_exports_only_relevant_workers_and_incidents(self) -> None:
