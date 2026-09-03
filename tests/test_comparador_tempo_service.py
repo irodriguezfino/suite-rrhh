@@ -25,6 +25,31 @@ class ComparadorTempoServiceTests(unittest.TestCase):
         self.assertIsNone(_marking_incidence("Festivo", ""))
         self.assertIsNone(_marking_incidence("[55] E 05:23", "[55] S 13:54"))
 
+    def test_sap_xlsx_is_read_with_the_same_totals_and_marking_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sap_path = Path(directory) / "informe_sap.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "Acumulados"
+            sheet.append([
+                "Fecha", "Trabajador", "1129-HE15%", "1166-HE30%", "1166-HE35%",
+                "1014-HNOC", "1146-PPEN", "Trab. Dia", "Marcajes", "Marcajes",
+            ])
+            sheet.append(["", "1001 ANA PRUEBA"])
+            sheet.append(["", "2026-08-01", None, None, None, None, None, None, "[55] E 05:23", ""])
+            sheet.append(["", "1001 ANA PRUEBA"])
+            sheet.append(["", "", 0.5, 0, 0, 0, 0, 8 / 24])
+            workbook.save(sap_path)
+            workbook.close()
+
+            totals, duplicates = ComparadorTempoService._read_sap_totals(sap_path)
+
+            self.assertEqual(duplicates, set())
+            self.assertEqual(totals["1001"]["worker"], "ANA PRUEBA")
+            self.assertEqual(totals["1001"]["values"]["1129-HE15%"], 720)
+            self.assertEqual(totals["1001"]["values"]["Trab. Dia"], 480)
+            self.assertEqual(totals["1001"]["marking_incidents"], ("Falta fichaje de salida",))
+
     def test_comparison_exports_only_relevant_workers_and_incidents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

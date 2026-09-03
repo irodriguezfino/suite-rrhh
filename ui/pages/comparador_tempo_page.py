@@ -181,7 +181,7 @@ class ComparadorTempoPage(QWidget):
         self.sap_edit.setVisible(False)
         self.sap_edit.textChanged.connect(self._update_state)
         tempo_card, self.tempo_file_name, self.tempo_file_location, self.tempo_file_status, self.tempo_button = self._source_selector_card("Excel de Acumulado", "Tabla dinámica con el periodo seleccionado", self._choose_tempo)
-        sap_card, self.sap_file_name, self.sap_file_location, self.sap_file_status, self.sap_button = self._source_selector_card("Excel Tempo SAP", "Exportación SAP de tiempos por trabajador", self._choose_sap)
+        sap_card, self.sap_file_name, self.sap_file_location, self.sap_file_status, self.sap_button = self._source_selector_card("Excel Tempo SAP", "Exportación SAP de tiempos por trabajador (.xls o .xlsx)", self._choose_sap)
         source_layout.addWidget(tempo_card)
         source_layout.addWidget(sap_card)
         self.preparation_body.addWidget(source_panel, 4)
@@ -525,7 +525,12 @@ class ComparadorTempoPage(QWidget):
             self.tempo_edit.setText(chosen)
 
     def _choose_sap(self) -> None:
-        chosen, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel Tempo SAP", self.sap_edit.text(), "Excel Tempo SAP (*.xls *.xml)")
+        chosen, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar Excel Tempo SAP",
+            self.sap_edit.text(),
+            "Excel Tempo SAP (*.xlsx *.xlsm *.xls *.xml)",
+        )
         if chosen:
             self.sap_edit.setText(chosen)
 

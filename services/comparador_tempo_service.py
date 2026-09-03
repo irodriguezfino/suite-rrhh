@@ -3,8 +3,8 @@
 El libro de Tempo contiene una tabla dinámica con sus filtros temporales ya
 configurados. Para no modificarlo, Excel abre una copia temporal y recorre las
 secciones de la propia tabla dinámica conservando el resto de filtros (incluido
-el de fecha). El informe SAP se lee directamente como XML Spreadsheet 2003;
-no se automatiza ni altera el Excel de origen.
+el de fecha). El informe SAP puede ser XML Spreadsheet 2003 o un libro moderno
+XLSX/XLSM; se lee en modo solo lectura y nunca se altera el Excel de origen.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import time
 import uuid
+import zipfile
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, time as clock_time, timedelta
@@ -266,6 +267,10 @@ class ComparadorTempoService:
             raise ValueError("El Excel de salida no puede sustituir ninguno de los archivos de entrada.")
         if request.output_path.suffix.lower() != ".xlsx":
             raise ValueError("El resultado debe guardarse como archivo .xlsx.")
+        if request.sap_path.suffix.lower() not in {".xls", ".xml", ".xlsx", ".xlsm"}:
+            raise ValueError(
+                "El informe SAP debe ser un Excel XML (.xls o .xml) o un libro moderno (.xlsx o .xlsm)."
+            )
 
     def _load_tempo_identities(self, path: Path) -> tuple[dict[str, dict[str, set[str]]], list[ComparatorIncident]]:
         try:
@@ -488,11 +493,60 @@ class ComparadorTempoService:
 
     @staticmethod
     def _read_sap_totals(path: Path) -> tuple[dict[str, dict], set[str]]:
+        if path.suffix.lower() in {".xlsx", ".xlsm"}:
+            return ComparadorTempoService._read_sap_totals_xlsx(path)
+        return ComparadorTempoService._read_sap_totals_xml(path)
+
+    @staticmethod
+    def _read_sap_totals_xml(path: Path) -> tuple[dict[str, dict], set[str]]:
         try:
             root = ET.parse(path).getroot()
         except (ET.ParseError, OSError) as exc:
-            raise ValueError("El informe SAP debe ser un Excel XML 2003 (.xls) legible.") from exc
+            raise ValueError(
+                "El informe SAP debe ser un Excel XML 2003 (.xls o .xml) legible, "
+                "o un libro moderno .xlsx."
+            ) from exc
         rows = root.findall(f".//{XML_NS}Worksheet/{XML_NS}Table/{XML_NS}Row")
+        return ComparadorTempoService._read_sap_totals_from_rows(
+            ComparadorTempoService._xml_row_values(row) for row in rows
+        )
+
+    @staticmethod
+    def _read_sap_totals_xlsx(path: Path) -> tuple[dict[str, dict], set[str]]:
+        """Lee una exportación SAP XLSX sin cargar el libro completo en memoria."""
+        try:
+            workbook = load_workbook(path, read_only=True, data_only=True)
+        except PermissionError as exc:
+            raise RuntimeError(
+                "No se puede leer el Excel Tempo SAP porque está abierto o bloqueado. "
+                "Ciérralo en Excel o selecciona una copia antes de comparar."
+            ) from exc
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            raise ValueError("El informe SAP .xlsx no es legible o está dañado.") from exc
+
+        missing_columns_error: ValueError | None = None
+        try:
+            for sheet in workbook.worksheets:
+                try:
+                    return ComparadorTempoService._read_sap_totals_from_rows(
+                        ComparadorTempoService._xlsx_row_values(row)
+                        for row in sheet.iter_rows(values_only=True)
+                    )
+                except ValueError as exc:
+                    if "No se localizaron las columnas SAP necesarias" not in str(exc):
+                        raise
+                    missing_columns_error = exc
+        finally:
+            workbook.close()
+
+        if missing_columns_error is not None:
+            raise missing_columns_error
+        raise ValueError("El informe SAP .xlsx no contiene hojas legibles.")
+
+    @staticmethod
+    def _read_sap_totals_from_rows(
+        rows: Iterable[dict[int, object]],
+    ) -> tuple[dict[str, dict], set[str]]:
         headers: dict[str, int] | None = None
         mark_columns: tuple[int, int] | None = None
         totals: dict[str, dict] = {}
@@ -500,8 +554,7 @@ class ComparadorTempoService:
         pending: tuple[str, str] | None = None
         current_worker: tuple[str, str] | None = None
         marking_incidents: dict[str, list[str]] = defaultdict(list)
-        for row in rows:
-            values = ComparadorTempoService._xml_row_values(row)
+        for values in rows:
             if not values:
                 continue
             if headers is None:
@@ -566,6 +619,15 @@ class ComparadorTempoService:
             values[column] = "" if data is None or data.text is None else data.text
             column += 1
         return values
+
+    @staticmethod
+    def _xlsx_row_values(row: tuple[object, ...]) -> dict[int, object]:
+        """Conserva los índices de columna de una fila XLSX, incluidos huecos."""
+        return {
+            column: value
+            for column, value in enumerate(row, start=1)
+            if value is not None
+        }
 
     def _compare(
         self,
