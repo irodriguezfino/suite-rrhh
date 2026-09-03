@@ -9,7 +9,16 @@ import openpyxl
 
 from core.models import ProcessRequest
 from core.exceptions import BatchProcessingError, ProcessingCancelled
-from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY, ExcelCollector, department_abbreviation_from_filename, get_monthly_control_month_label, is_hire_date_eligible
+from fase1_recopilacion import (
+    EMPLOYMENT_MODE_ACTIVE,
+    PROCESS_MODE_DAILY,
+    PROCESS_MODE_MONTHLY,
+    ExcelCollector,
+    _clear_fragments_excluding_merged_areas,
+    department_abbreviation_from_filename,
+    get_monthly_control_month_label,
+    is_hire_date_eligible,
+)
 from services.fase1_service import Fase1Service
 from services.output_lock import OutputLock
 
@@ -39,6 +48,25 @@ class Fase1ServiceTests(unittest.TestCase):
         self.assertEqual(department_abbreviation_from_filename("ParteMensual_Matanza_Zona_Limpia_2026.xlsx"), "ML")
         self.assertEqual(department_abbreviation_from_filename("ParteMensual_Matanza_Zona_Sucia_2026.xlsx"), "MS")
         self.assertEqual(department_abbreviation_from_filename("ParteMensual_RT_2026.xlsx"), "RT")
+
+    def test_clear_fragments_preserve_merged_note_without_cell_by_cell_work(self) -> None:
+        fragments, preserved = _clear_fragments_excluding_merged_areas(
+            first_col=4,
+            last_col=23,
+            first_row=5,
+            last_row=2500,
+            merged_areas=[(20, 410, 34, 410, "T410:AH410")],
+        )
+
+        self.assertEqual(preserved, ["T410:AH410"])
+        self.assertEqual(
+            fragments,
+            [
+                (4, 5, 23, 409),
+                (4, 410, 19, 410),
+                (4, 411, 23, 2500),
+            ],
+        )
 
     def test_hire_date_equal_to_selected_date_is_eligible(self) -> None:
         selected = datetime(2026, 8, 4).date()

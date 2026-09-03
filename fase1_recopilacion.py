@@ -22,11 +22,13 @@ from __future__ import annotations
 import calendar
 import gc
 import os
+import posixpath
 import queue
 import shutil
 import tempfile
 import time
 import sys
+import zipfile
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
@@ -34,11 +36,13 @@ from datetime import datetime, date, timedelta
 from multiprocessing import Manager, freeze_support
 from pathlib import Path
 from typing import Callable, Any
+from xml.etree import ElementTree
 
 from core.config import get_excel_password
 from core.exceptions import BatchProcessingError, OutputInUseError, ProcessingCancelled
 
 import openpyxl
+from openpyxl.utils import range_boundaries
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
 
@@ -347,11 +351,152 @@ def _emit(progress_queue, event: str, index: int, file_path: str, message: str, 
         pass
 
 
-def _clear_non_selected_day_in_month_sheet(ws, selected_day: int) -> int:
+_XLSX_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_XLSX_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _merged_areas_from_xlsx(source_path: Path, sheet_names: tuple[str, ...]) -> dict[str, list[tuple[int, int, int, int, str]]]:
+    """Lee solo las combinaciones de las hojas que se van a limpiar.
+
+    Se consulta directamente el XML del XLSX/XLSM en vez de recorrer celdas COM.
+    Eso evita decenas de miles de llamadas a Excel y permite proteger notas o
+    cabeceras combinadas antes de limpiar el periodo mensual.
+    """
+    requested = {name.casefold() for name in sheet_names}
+    if not requested:
+        return {}
+    try:
+        with zipfile.ZipFile(source_path) as archive:
+            workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+            relationships = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+            targets = {
+                node.attrib["Id"]: node.attrib["Target"]
+                for node in relationships
+                if "Id" in node.attrib and "Target" in node.attrib
+            }
+            result: dict[str, list[tuple[int, int, int, int, str]]] = {}
+            for sheet in workbook.findall(f".//{{{_XLSX_MAIN_NS}}}sheet"):
+                sheet_name = sheet.attrib.get("name", "")
+                if sheet_name.casefold() not in requested:
+                    continue
+                relation_id = sheet.attrib.get(f"{{{_XLSX_REL_NS}}}id")
+                target = targets.get(relation_id or "")
+                if not target:
+                    raise RuntimeError(f"No se pudo localizar la hoja {sheet_name!r} dentro del libro.")
+                part_path = target.lstrip("/")
+                if not part_path.startswith("xl/"):
+                    part_path = posixpath.normpath(posixpath.join("xl", part_path))
+                root = ElementTree.fromstring(archive.read(part_path))
+                areas: list[tuple[int, int, int, int, str]] = []
+                for node in root.findall(f".//{{{_XLSX_MAIN_NS}}}mergeCell"):
+                    address = node.attrib.get("ref", "")
+                    if not address:
+                        continue
+                    try:
+                        min_col, min_row, max_col, max_row = range_boundaries(address)
+                    except ValueError:
+                        continue
+                    if max_row < CLEAR_FIRST_ROW or min_row > CLEAR_LAST_ROW:
+                        continue
+                    if max_col < CLEAR_FIRST_COL or min_col > CLEAR_LAST_COL:
+                        continue
+                    areas.append((min_col, min_row, max_col, max_row, address))
+                result[sheet_name.casefold()] = areas
+            missing = requested.difference(result)
+            if missing:
+                raise RuntimeError(f"No se pudieron inspeccionar las combinaciones de: {', '.join(sorted(missing))}.")
+            return result
+    except (OSError, KeyError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+        raise RuntimeError(
+            "No se pudieron revisar las celdas combinadas del libro antes de limpiarlo. "
+            f"No se ha modificado el archivo. Detalle: {exc}"
+        ) from exc
+
+
+def _clear_fragments_excluding_merged_areas(
+    first_col: int,
+    last_col: int,
+    first_row: int,
+    last_row: int,
+    merged_areas: list[tuple[int, int, int, int, str]],
+) -> tuple[list[tuple[int, int, int, int]], list[str]]:
+    """Divide un rectángulo en bloques no combinados, sin trabajar celda a celda."""
+    blockers: list[tuple[int, int, int, int, str]] = []
+    for merge_first_col, merge_first_row, merge_last_col, merge_last_row, address in merged_areas:
+        if merge_last_col < first_col or merge_first_col > last_col:
+            continue
+        if merge_last_row < first_row or merge_first_row > last_row:
+            continue
+        blockers.append((
+            max(first_col, merge_first_col),
+            max(first_row, merge_first_row),
+            min(last_col, merge_last_col),
+            min(last_row, merge_last_row),
+            address,
+        ))
+    if not blockers:
+        return [(first_col, first_row, last_col, last_row)], []
+
+    row_breaks = {first_row, last_row + 1}
+    for _merge_first_col, merge_first_row, _merge_last_col, merge_last_row, _address in blockers:
+        row_breaks.add(merge_first_row)
+        row_breaks.add(merge_last_row + 1)
+
+    fragments: list[tuple[int, int, int, int]] = []
+    for row_start, row_end_exclusive in zip(sorted(row_breaks), sorted(row_breaks)[1:]):
+        row_end = row_end_exclusive - 1
+        intervals = sorted(
+            (merge_first_col, merge_last_col)
+            for merge_first_col, merge_first_row, merge_last_col, merge_last_row, _address in blockers
+            if merge_first_row <= row_start <= merge_last_row
+        )
+        cursor = first_col
+        for interval_start, interval_end in intervals:
+            if interval_start > cursor:
+                fragments.append((cursor, row_start, interval_start - 1, row_end))
+            cursor = max(cursor, interval_end + 1)
+        if cursor <= last_col:
+            fragments.append((cursor, row_start, last_col, row_end))
+    return fragments, [address for *_bounds, address in blockers]
+
+
+def _clear_range_contents_safely(
+    ws,
+    first_col: int,
+    last_col: int,
+    merged_areas: list[tuple[int, int, int, int, str]],
+) -> tuple[int, list[str]]:
+    """Limpia el bloque de días preservando cualquier área combinada que toque."""
+    fragments, preserved_areas = _clear_fragments_excluding_merged_areas(
+        first_col,
+        last_col,
+        CLEAR_FIRST_ROW,
+        CLEAR_LAST_ROW,
+        merged_areas,
+    )
+    cleared_cells = 0
+    for fragment_first_col, fragment_first_row, fragment_last_col, fragment_last_row in fragments:
+        first_letter = excel_col_letter(fragment_first_col)
+        last_letter = excel_col_letter(fragment_last_col)
+        ws.Range(
+            f"{first_letter}{fragment_first_row}:{last_letter}{fragment_last_row}"
+        ).ClearContents()
+        cleared_cells += (
+            (fragment_last_col - fragment_first_col + 1)
+            * (fragment_last_row - fragment_first_row + 1)
+        )
+    return cleared_cells, preserved_areas
+
+
+def _clear_non_selected_day_in_month_sheet(
+    ws,
+    selected_day: int,
+    merged_areas: list[tuple[int, int, int, int, str]],
+) -> tuple[int, list[str]]:
     """Limpia D5:AH2500 en la hoja activa salvo la columna del dia elegido."""
     day_col = CLEAR_FIRST_COL + selected_day - 1
     cleared_cells = 0
-    row_count = CLEAR_LAST_ROW - CLEAR_FIRST_ROW + 1
+    preserved_areas: list[str] = []
 
     ranges_to_clear = []
     if day_col > CLEAR_FIRST_COL:
@@ -360,12 +505,13 @@ def _clear_non_selected_day_in_month_sheet(ws, selected_day: int) -> int:
         ranges_to_clear.append((day_col + 1, CLEAR_LAST_COL))
 
     for first_col, last_col in ranges_to_clear:
-        first_letter = excel_col_letter(first_col)
-        last_letter = excel_col_letter(last_col)
-        ws.Range(f"{first_letter}{CLEAR_FIRST_ROW}:{last_letter}{CLEAR_LAST_ROW}").ClearContents()
-        cleared_cells += (last_col - first_col + 1) * row_count
+        cleared, preserved = _clear_range_contents_safely(
+            ws, first_col, last_col, merged_areas
+        )
+        cleared_cells += cleared
+        preserved_areas.extend(preserved)
 
-    return cleared_cells
+    return cleared_cells, list(dict.fromkeys(preserved_areas))
 
 
 
@@ -398,25 +544,31 @@ def get_monthly_control_month_label(selected_date_obj: date) -> str:
     return MONTH_LABELS[selected_date_obj.month - 1]
 
 
-def _clear_columns_in_month_sheet(ws, first_day: int, last_day: int) -> int:
+def _clear_columns_in_month_sheet(
+    ws,
+    first_day: int,
+    last_day: int,
+    merged_areas: list[tuple[int, int, int, int, str]],
+) -> tuple[int, list[str]]:
     """Limpia los dias indicados (ambos incluidos) en D5:AH2500."""
     first_day = max(1, int(first_day))
     last_day = min(31, int(last_day))
     if first_day > last_day:
-        return 0
+        return 0, []
     first_col = CLEAR_FIRST_COL + first_day - 1
     last_col = CLEAR_FIRST_COL + last_day - 1
     first_col = max(CLEAR_FIRST_COL, first_col)
     last_col = min(CLEAR_LAST_COL, last_col)
     if first_col > last_col:
-        return 0
-    first_letter = excel_col_letter(first_col)
-    last_letter = excel_col_letter(last_col)
-    ws.Range(f"{first_letter}{CLEAR_FIRST_ROW}:{last_letter}{CLEAR_LAST_ROW}").ClearContents()
-    return (last_col - first_col + 1) * (CLEAR_LAST_ROW - CLEAR_FIRST_ROW + 1)
+        return 0, []
+    return _clear_range_contents_safely(ws, first_col, last_col, merged_areas)
 
 
-def _clear_monthly_period(wb, selected_date_obj: date) -> tuple[int, list[str]]:
+def _clear_monthly_period(
+    wb,
+    selected_date_obj: date,
+    merged_areas_by_sheet: dict[str, list[tuple[int, int, int, int, str]]],
+) -> tuple[int, list[str], list[str]]:
     """
     Prepara el periodo mensual 20_20 conservando solo el tramo necesario.
 
@@ -430,6 +582,7 @@ def _clear_monthly_period(wb, selected_date_obj: date) -> tuple[int, list[str]]:
     """
     cleared_cells = 0
     touched: list[str] = []
+    preserved_merged_areas: list[str] = []
     previous_year, previous_month = get_previous_month(selected_date_obj.year, selected_date_obj.month)
     previous_sheet_name = MONTH_SHEETS[previous_month - 1]
     selected_sheet_name = MONTH_SHEETS[selected_date_obj.month - 1]
@@ -465,11 +618,17 @@ def _clear_monthly_period(wb, selected_date_obj: date) -> tuple[int, list[str]]:
         except Exception:
             pass
         for first_day, last_day in ranges:
-            cleared = _clear_columns_in_month_sheet(ws, first_day, last_day)
+            cleared, preserved = _clear_columns_in_month_sheet(
+                ws,
+                first_day,
+                last_day,
+                merged_areas_by_sheet.get(sheet_name.casefold(), []),
+            )
             cleared_cells += cleared
             if cleared:
                 touched.append(f"{sheet_name} dias {first_day}-{last_day}")
-    return cleared_cells, touched
+            preserved_merged_areas.extend(f"{sheet_name}!{address}" for address in preserved)
+    return cleared_cells, touched, list(dict.fromkeys(preserved_merged_areas))
 
 def _find_control_month_block(control, month_label: str) -> tuple[int, int, list, list[tuple[int, str]]]:
     xl_to_left = -4159
@@ -597,6 +756,25 @@ def _prepare_and_extract_with_excel(
 
     selected_sheet_name = MONTH_SHEETS[selected_month - 1]
     selected_month_label = MONTH_LABELS[selected_month - 1]
+    if process_mode == PROCESS_MODE_MONTHLY:
+        _previous_year, previous_month = get_previous_month(
+            selected_date_obj.year, selected_date_obj.month
+        )
+        _next_year, next_month = get_next_month(
+            selected_date_obj.year, selected_date_obj.month
+        )
+        sheets_to_clean = [
+            MONTH_SHEETS[previous_month - 1],
+            selected_sheet_name,
+        ]
+        if selected_date_obj.day >= 21:
+            sheets_to_clean.append(MONTH_SHEETS[next_month - 1])
+    else:
+        sheets_to_clean = [selected_sheet_name]
+    merged_areas_by_sheet = _merged_areas_from_xlsx(
+        temp_path,
+        tuple(dict.fromkeys(sheets_to_clean)),
+    )
     excel = None
     wb = None
     control = None
@@ -648,7 +826,11 @@ def _prepare_and_extract_with_excel(
 
         if process_mode == PROCESS_MODE_MONTHLY:
             _emit(progress_queue, "stage", index, source_path, "Limpiando periodo mensual 20_20", progress_units=1)
-            cleared_cells, cleared_ranges = _clear_monthly_period(wb, selected_date_obj)
+            cleared_cells, cleared_ranges, preserved_merged_areas = _clear_monthly_period(
+                wb,
+                selected_date_obj,
+                merged_areas_by_sheet,
+            )
             control_sheet_name = MONTHLY_CONTROL_SHEET
             control_month_label = get_monthly_control_month_label(selected_date_obj)
         else:
@@ -666,7 +848,14 @@ def _prepare_and_extract_with_excel(
                 ws.DisplayPageBreaks = False
             except Exception:
                 pass
-            cleared_cells = _clear_non_selected_day_in_month_sheet(ws, selected_day)
+            cleared_cells, preserved = _clear_non_selected_day_in_month_sheet(
+                ws,
+                selected_day,
+                merged_areas_by_sheet.get(selected_sheet_name.casefold(), []),
+            )
+            preserved_merged_areas = [
+                f"{selected_sheet_name}!{address}" for address in preserved
+            ]
             cleared_ranges = [f"{selected_sheet_name}: se conserva dia {selected_day}"]
             control_sheet_name = CONTROL_SHEET
             control_month_label = selected_month_label
@@ -844,6 +1033,7 @@ def _prepare_and_extract_with_excel(
             "process_mode": process_mode,
             "control_sheet": control_sheet_name,
             "cleared_ranges": "; ".join(cleared_ranges),
+            "preserved_merged_areas": "; ".join(preserved_merged_areas),
             "expected_included_rows": expected_included_rows,
             "expected_blank_baja_rows": expected_included_rows,
             "extracted_rows": len(extracted),
@@ -1159,7 +1349,7 @@ class ExcelCollector:
 
         audit_ws = out.create_sheet("Auditoria")
         audit_headers = [
-            "Archivo", "Estado", "Proceso", "Modo", "Hoja control", "Rangos limpiados", "Mes", "Dia", "Fecha seleccionada", "Ultima fila persona", "Filas persona",
+            "Archivo", "Estado", "Proceso", "Modo", "Hoja control", "Rangos limpiados", "Áreas combinadas preservadas", "Mes", "Dia", "Fecha seleccionada", "Ultima fila persona", "Filas persona",
             "Filas esperadas incluidas", "Filas extraidas", "Filas omitidas",
             "Columna BAJA", "Columnas identidad", "Inicio bloque mes", "Columnas bloque mes", "Celdas limpiadas",
             "Escaneado hasta fila", "Segundos", "Posiciones meses", "Avisos",
@@ -1174,6 +1364,7 @@ class ExcelCollector:
                 a.get("employment_mode", self.employment_mode),
                 a.get("control_sheet", ""),
                 a.get("cleared_ranges", ""),
+                a.get("preserved_merged_areas", ""),
                 a.get("selected_month", self.month_label),
                 a.get("selected_day", self.selected_date.day),
                 a.get("selected_date", self.selected_date.strftime("%d/%m/%Y")),

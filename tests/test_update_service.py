@@ -45,16 +45,16 @@ class UpdateServiceTests(unittest.TestCase):
 
             def read(self) -> bytes:
                 return (
-                    b'\xef\xbb\xbf{"version":"1.0.7",'
+                    b'\xef\xbb\xbf{"version":"9.9.9",'
                     b'"package_url":"https://raw.githubusercontent.com/irodriguezfino/'
-                    b'suite-rrhh/main/updates/Suite_RRHH_update_1.0.7.zip",'
+                    b'suite-rrhh/main/updates/Suite_RRHH_update_9.9.9.zip",'
                     b'"sha256":"' + (b"a" * 64) + b'"}'
                 )
 
         with patch("services.update_service.urllib.request.urlopen", return_value=Response()):
             update = UpdateService().check_for_update()
         self.assertIsNotNone(update)
-        self.assertEqual(update.version, "1.0.7")
+        self.assertEqual(update.version, "9.9.9")
 
     def test_excel_password_reads_local_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
