@@ -51,12 +51,12 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             sheet.title = "Acumulados"
             sheet.append([
                 "Fecha", "Trabajador", "1129-HE15%", "1166-HE30%", "1166-HE35%",
-                "1014-HNOC", "1146-PPEN", "Trab. Dia", "Marcajes", "Marcajes",
+                "1014-HNOC", "1146-PPEN", "1153-PRUI", "1052-HDESC", "Trab. Dia", "Marcajes", "Marcajes",
             ])
             sheet.append(["", "1001 ANA PRUEBA"])
-            sheet.append(["", "2026-08-01", None, None, None, None, None, None, "[55] E 05:23", ""])
+            sheet.append(["", "2026-08-01", None, None, None, None, None, None, None, None, "[55] E 05:23", ""])
             sheet.append(["", "1001 ANA PRUEBA"])
-            sheet.append(["", "", 0.5, 0, 0, 0, 0, 3 + 70 / 1440])
+            sheet.append(["", "", 0.5, 0, 0, 0, 0, 0, 0, 3 + 70 / 1440])
             workbook.save(sap_path)
             workbook.close()
 
@@ -66,6 +66,8 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertEqual(totals["1001"]["worker"], "ANA PRUEBA")
             self.assertEqual(totals["1001"]["values"]["1129-HE15%"], 720)
             self.assertEqual(totals["1001"]["values"]["Trab. Dia"], 4390)
+            self.assertEqual(totals["1001"]["values"]["1153-PRUI"], 0)
+            self.assertEqual(totals["1001"]["values"]["1052-HDESC"], 0)
             self.assertEqual(totals["1001"]["marking_incidents"], ("Falta fichaje de salida",))
 
     def test_comparison_exports_only_relevant_workers_and_incidents(self) -> None:
@@ -103,8 +105,81 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertTrue(result.incidents_path.exists())
             workbook = load_workbook(output, data_only=True)
             self.assertEqual(workbook["Resultado"][1][0].value, "Comparador de Tempo · Resultado")
-            self.assertEqual(workbook["Resultado"][6][5].value, "-1:00")
-            self.assertTrue(workbook["Resultado"][6][5].fill.fgColor.rgb.endswith("FFF4CC"))
+            self.assertEqual(workbook["Resultado"][6][6].value, "-1:00")
+            self.assertTrue(workbook["Resultado"][6][6].fill.fgColor.rgb.endswith("FFF4CC"))
+            workbook.close()
+
+    def test_special_sap_controls_and_absence_are_included_in_red(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tempo, sap, output = root / "tempo.xlsx", root / "sap.xls", root / "resultado.xlsx"
+            tempo.touch()
+            sap.touch()
+            zero = {"H. EXTRAS": 0, "HFJ (15%)": 0, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": 0, "RUIDO": 0, "ABSENT": 0}
+            absent = {**zero, "ABSENT": 60}
+
+            def sap_values(**overrides):
+                return {
+                    "1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0,
+                    "1014-HNOC": 0, "1146-PPEN": 0, "1153-PRUI": 0,
+                    "1052-HDESC": 0, "Trab. Dia": 0, **overrides,
+                }
+
+            result = ComparadorTempoService(
+                lambda _path, _cancel, _progress: {
+                    "MTO": [{"worker": "Marta", "values": zero}],
+                    "ADMON": [{"worker": "Ana", "values": zero}],
+                    "TR": [{"worker": "Pepa", "values": zero}],
+                    "L3": [{"worker": "Berta", "values": absent}],
+                },
+                lambda _path: ({
+                    "MTO": {"MARTA": {"1001"}}, "ADMON": {"ANA": {"1002"}},
+                    "TR": {"PEPA": {"1003"}}, "L3": {"BERTA": {"1004"}},
+                }, []),
+                lambda _path: ({
+                    "1001": {"worker": "MARTA", "values": sap_values(**{"1153-PRUI": 30})},
+                    "1002": {"worker": "ANA", "values": sap_values(**{"1014-HNOC": 45})},
+                    "1003": {"worker": "PEPA", "values": sap_values(**{"1146-PPEN": 15})},
+                    "1004": {"worker": "BERTA", "values": sap_values(**{"1052-HDESC": 60})},
+                }, set()),
+            ).run(ComparatorRequest(tempo, sap, output))
+
+            by_worker = {row.worker: row for row in result.rows}
+            self.assertEqual(set(by_worker), {"Marta", "Ana", "Pepa", "Berta"})
+            self.assertEqual(by_worker["Marta"].values_minutes["RUIDO"], 30)
+            self.assertEqual(by_worker["Marta"].red_fields, ("RUIDO",))
+            self.assertEqual(by_worker["Ana"].values_minutes["NOCTUR"], 45)
+            self.assertIn("NOCTUR", by_worker["Ana"].red_fields)
+            self.assertEqual(by_worker["Pepa"].values_minutes["PENOS"], 15)
+            self.assertIn("PENOS", by_worker["Pepa"].red_fields)
+            self.assertEqual(by_worker["Berta"].values_minutes["ABSENT"], 0)
+            self.assertEqual(by_worker["Berta"].red_fields, ("ABSENT",))
+            self.assertTrue(any(item.incident_type == "Control especial SAP" for item in result.incidents))
+            self.assertTrue(any(item.incident_type == "Absentismo" for item in result.incidents))
+
+            workbook = load_workbook(output)
+            sheet = workbook["Resultado"]
+            worker_rows = {
+                str(sheet.cell(row_number, 1).value): row_number
+                for row_number in range(1, sheet.max_row + 1)
+                if sheet.cell(row_number, 1).value in {"Marta", "Berta"}
+            }
+            marta_header = worker_rows["Marta"] - 1
+            berta_header = worker_rows["Berta"] - 1
+            marta_columns = {
+                str(sheet.cell(marta_header, column).value): column
+                for column in range(1, sheet.max_column + 1)
+            }
+            berta_columns = {
+                str(sheet.cell(berta_header, column).value): column
+                for column in range(1, sheet.max_column + 1)
+            }
+            ruido_cell = sheet.cell(worker_rows["Marta"], marta_columns["Δ RUIDO"])
+            absent_cell = sheet.cell(worker_rows["Berta"], berta_columns["ABSENT"])
+            self.assertEqual(ruido_cell.value, "0:30")
+            self.assertEqual(absent_cell.value, "0:00")
+            self.assertTrue(ruido_cell.fill.fgColor.rgb.endswith("FDE2E1"))
+            self.assertTrue(absent_cell.fill.fgColor.rgb.endswith("FDE2E1"))
             workbook.close()
 
     def test_marking_incidence_includes_worker_without_time_difference(self) -> None:

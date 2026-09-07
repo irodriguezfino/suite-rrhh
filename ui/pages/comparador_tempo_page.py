@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QElapsedTimer, QProcess, QTimer, Qt, Signal, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtGui import QAction, QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QBoxLayout, QComboBox, QFileDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QProgressBar,
@@ -153,7 +153,7 @@ class ComparadorTempoPage(QWidget):
         summary_text = QLabel(
             "• Se muestran solo los trabajadores que requieren revisión.\n"
             "• Cada columna Δ calcula: tiempo SAP − tiempo del Acumulado.\n"
-            "• ABSENT conserva el valor del Acumulado; también verás incidencias y el trabajo diario de SAP."
+            "• ABSENT muestra SAP 1052-HDESC − Acumulado cuando existe absentismo; los controles SAP directos se resaltan en rojo."
         )
         summary_text.setObjectName("summaryCardText")
         summary_text.setWordWrap(True)
@@ -676,6 +676,8 @@ class ComparadorTempoPage(QWidget):
                 tuple(str(value) for value in item.get("incidence_messages", [])),
                 item.get("sap_daily_work_minutes"),
                 tuple(str(value) for value in item.get("suppressed_fields", [])),
+                item.get("sap_daily_minus_noise_minutes"),
+                tuple(str(value) for value in item.get("red_fields", [])),
             )
             for item in data.get("rows", [])
         )
@@ -724,15 +726,29 @@ class ComparadorTempoPage(QWidget):
                 row.worker,
                 "; ".join(row.incidence_messages) if row.incidence_messages else "-",
                 self._format_minutes(row.sap_daily_work_minutes),
+                self._format_difference(row.sap_daily_minus_noise_minutes or 0),
                 *[
-                    "-" if column in row.suppressed_fields else self._format_difference(row.values_minutes.get(column, 0))
+                    "-" if column in row.suppressed_fields else (
+                        self._format_minutes(row.values_minutes.get(column, 0))
+                        if column in row.red_fields else self._format_difference(row.values_minutes.get(column, 0))
+                    )
                     for column in TIME_COLUMNS[:-1]
                 ],
-                self._format_minutes(row.values_minutes.get("ABSENT", 0)),
+                self._format_difference(row.values_minutes.get("ABSENT", 0)) if "ABSENT" in row.red_fields else "-",
             ]
+            red_columns = {
+                4 + index
+                for index, column in enumerate(TIME_COLUMNS[:-1])
+                if column in row.red_fields
+            }
+            if "ABSENT" in row.red_fields:
+                red_columns.add(len(values) - 1)
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter if column in {0, 1} else Qt.AlignCenter)
+                if column in red_columns:
+                    item.setBackground(QColor("#FDE2E1"))
+                    item.setForeground(QColor("#9C0006"))
                 self.preview_table.setItem(row_index, column, item)
         self.preview_table.resizeColumnsToContents()
         self.preview_count.setText(f"{len(rows)} trabajador(es)")
@@ -847,7 +863,7 @@ class ComparadorTempoPage(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_result.output_path.parent)))
 
     def show_context_help(self) -> None:
-        QMessageBox.information(self, "Ayuda del Comparador de Tempo", "1. Selecciona el Excel de Acumulado con sus filtros ya definidos.\n2. Selecciona el Excel Tempo SAP.\n3. Pulsa Comprobar datos y elige el Excel de salida.\n4. Consulta el resultado y el Excel independiente de incidencias.\n\nLas columnas Δ muestran SAP − Acumulado; ABSENT conserva el dato del Acumulado. Se compara por código SAP y se admite una diferencia de hasta un minuto.")
+        QMessageBox.information(self, "Ayuda del Comparador de Tempo", "1. Selecciona el Excel de Acumulado con sus filtros ya definidos.\n2. Selecciona el Excel Tempo SAP.\n3. Pulsa Comprobar datos y elige el Excel de salida.\n4. Consulta el resultado y el Excel independiente de incidencias.\n\nLas columnas Δ muestran SAP − Acumulado. ABSENT compara SAP 1052-HDESC − Acumulado cuando existe absentismo; los controles SAP directos se muestran en rojo. Se compara por código SAP y se admite una diferencia de hasta un minuto.")
 
     def request_leave(self) -> bool:
         if not self.is_running:

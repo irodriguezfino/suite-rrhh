@@ -40,7 +40,7 @@ TIME_COLUMNS = (
 )
 COMPARISON_COLUMNS = TIME_COLUMNS[:-1]
 RESULT_COLUMNS = (
-    "Trabajador", "Incidencias", "Trab. Día SAP",
+    "Trabajador", "Incidencias", "Trab. Día SAP", "Δ Trab. Día SAP − RUIDO Acumulado",
     *[f"Δ {field}" for field in COMPARISON_COLUMNS], "ABSENT",
 )
 SAP_FIELD_BY_TEMPO = {
@@ -49,16 +49,18 @@ SAP_FIELD_BY_TEMPO = {
     "BOLSA (X%)": "1166-HE35%",
     "NOCTUR": "1014-HNOC",
     "PENOS": "1146-PPEN",
-    "RUIDO": "Trab. Dia",
+    "RUIDO": "1153-PRUI",
+    "ABSENT": "1052-HDESC",
 }
-SAP_COLUMNS = tuple(SAP_FIELD_BY_TEMPO.values())
-# ABSENT es una incidencia de Tempo que siempre debe mostrarse. Las horas
-# extras y HFJ se tratan como el resto de conceptos: solo se incluyen si su
-# acumulado no coincide con el total correspondiente de SAP.
-REQUIRED_DIRECT_VALUES = ("ABSENT",)
+SAP_COLUMNS = (
+    "1129-HE15%", "1166-HE30%", "1166-HE35%", "1014-HNOC", "1146-PPEN",
+    "1153-PRUI", "1052-HDESC", "Trab. Dia",
+)
 TOLERANCE_MINUTES = 1
 MISSING_MARKING_MESSAGES = frozenset({"Falta fichaje de entrada", "Falta fichaje de salida"})
 COMBINED_EXTRA_BOLSA_SECTIONS = frozenset({"ML", "MS", "MC", "MV"})
+SPECIAL_NOISE_SECTIONS = frozenset({"ADMON", "CONG", "CAL", "COMP", "EXP", "RRHH", "RT", "SV", "SVC", "TIC", "MTO"})
+SPECIAL_NOCTURNITY_SECTIONS = frozenset({"ADMON", "RRHH"})
 OUTPUT_REPLACE_ATTEMPTS = 12
 OUTPUT_REPLACE_DELAY_SECONDS = 0.25
 XML_NS = "{urn:schemas-microsoft-com:office:spreadsheet}"
@@ -700,13 +702,23 @@ class ComparadorTempoService:
                 matched_codes.add(code)
                 sap_values = dict(sap["values"])
                 marking_messages = tuple(str(message) for message in sap.get("marking_incidents", ()))
-                has_combined_extra_bolsa = _normalise_text(section).upper() in COMBINED_EXTRA_BOLSA_SECTIONS
+                normalized_section = _normalise_text(section).upper()
+                has_combined_extra_bolsa = normalized_section in COMBINED_EXTRA_BOLSA_SECTIONS
+                has_special_noise_rule = normalized_section in SPECIAL_NOISE_SECTIONS
+                has_special_nocturnity_rule = normalized_section in SPECIAL_NOCTURNITY_SECTIONS
                 mismatches: list[tuple[str, int, int, int]] = []
                 trigger_fields: set[str] = set()
                 for tempo_field, sap_field in SAP_FIELD_BY_TEMPO.items():
+                    if tempo_field == "ABSENT":
+                        continue
                     if has_combined_extra_bolsa and tempo_field == "H. EXTRAS":
                         # En ML/MS/MC/MV las extras se liquidan conjuntamente
                         # en Bolsa; no tienen comparación independiente.
+                        continue
+                    if has_special_noise_rule and tempo_field == "RUIDO":
+                        # En estas secciones RUIDO SAP debe ser cero. No se
+                        # compara contra Tempo: un valor SAP distinto de cero
+                        # se presenta como control directo en rojo.
                         continue
                     compared_tempo_minutes = values[tempo_field]
                     comparison_name = tempo_field
@@ -716,39 +728,78 @@ class ComparadorTempoService:
                         comparison_name = "BOLSA (X%) · H. EXTRAS + BOLSA (X%)"
                         reason_prefix = "En esta sección se compara SAP 1166-HE35% con Tempo H. EXTRAS + BOLSA (X%). "
                     # La salida y la auditoría expresan siempre SAP menos Tempo.
-                    difference = sap_values[sap_field] - compared_tempo_minutes
+                    difference = sap_values.get(sap_field, 0) - compared_tempo_minutes
                     if abs(difference) > TOLERANCE_MINUTES:
-                        mismatches.append((tempo_field, compared_tempo_minutes, sap_values[sap_field], difference))
+                        mismatches.append((tempo_field, compared_tempo_minutes, sap_values.get(sap_field, 0), difference))
                         trigger_fields.add(tempo_field)
-                        incidents.append(self._incident("Diferencia", section, code, worker, sap["worker"], comparison_name, compared_tempo_minutes, sap_values[sap_field], difference, f"{reason_prefix}La diferencia supera {TOLERANCE_MINUTES} minuto.", values, sap_values))
+                        incidents.append(self._incident("Diferencia", section, code, worker, sap["worker"], comparison_name, compared_tempo_minutes, sap_values.get(sap_field, 0), difference, f"{reason_prefix}La diferencia supera {TOLERANCE_MINUTES} minuto.", values, sap_values))
+
+                red_values: dict[str, int] = {}
+                if has_special_noise_rule and sap_values.get("1153-PRUI", 0) != 0:
+                    red_values["RUIDO"] = sap_values["1153-PRUI"]
+                    incidents.append(self._incident(
+                        "Control especial SAP", section, code, worker, sap["worker"], "RUIDO",
+                        values["RUIDO"], sap_values["1153-PRUI"],
+                        sap_values["1153-PRUI"] - values["RUIDO"],
+                        "La sección no debe tener RUIDO en SAP (1153-PRUI); se muestra el valor SAP para revisión.",
+                        values, sap_values,
+                    ))
+                if has_special_nocturnity_rule and sap_values.get("1014-HNOC", 0) != 0:
+                    red_values["NOCTUR"] = sap_values["1014-HNOC"]
+                    incidents.append(self._incident(
+                        "Control especial SAP", section, code, worker, sap["worker"], "NOCTUR",
+                        values["NOCTUR"], sap_values["1014-HNOC"],
+                        sap_values["1014-HNOC"] - values["NOCTUR"],
+                        "La sección no debe tener NOCTUR en SAP (1014-HNOC); se muestra el valor SAP para revisión.",
+                        values, sap_values,
+                    ))
+                if sap_values.get("1146-PPEN", 0) != 0:
+                    red_values["PENOS"] = sap_values["1146-PPEN"]
+                    incidents.append(self._incident(
+                        "Control especial SAP", section, code, worker, sap["worker"], "PENOS",
+                        values["PENOS"], sap_values["1146-PPEN"],
+                        sap_values["1146-PPEN"] - values["PENOS"],
+                        "SAP tiene PENOS (1146-PPEN); se muestra el valor SAP para revisión.",
+                        values, sap_values,
+                    ))
+
+                absent_sap_minutes = sap_values.get("1052-HDESC", 0)
+                absent_difference = absent_sap_minutes - values["ABSENT"]
+                has_absence = absent_sap_minutes != 0 or values["ABSENT"] != 0
+                if has_absence:
+                    red_values["ABSENT"] = absent_difference
+                    incidents.append(self._incident(
+                        "Absentismo", section, code, worker, sap["worker"], "ABSENT",
+                        values["ABSENT"], absent_sap_minutes, absent_difference,
+                        "Se muestra la diferencia SAP 1052-HDESC − ABSENT Tempo, incluso cuando es cero.",
+                        values, sap_values,
+                    ))
                 for message in marking_messages:
                     incidents.append(self._incident("Incidencia de marcaje", section, code, worker, sap["worker"], "Marcajes", None, None, None, message, values, sap_values))
-                # La primera premisa no es una comparación: cualquier
-                # absentismo real (también un único minuto) debe aparecer.
-                direct = any(values[field] != 0 for field in REQUIRED_DIRECT_VALUES)
-                if direct:
-                    trigger_fields.update(field for field in REQUIRED_DIRECT_VALUES if values[field] != 0)
                 # Las incidencias nominales (vacaciones, enfermedad, etc.) se
                 # mantienen en el Excel de incidencias, pero no se imprimen en
                 # el resultado si no hay nada que revisar. Un fichaje faltante
                 # siempre requiere revisión y sí conserva su fila.
                 missing_marking = any(message in MISSING_MARKING_MESSAGES for message in marking_messages)
-                if direct or mismatches or missing_marking:
+                if red_values or mismatches or missing_marking:
                     ordered_triggers = tuple(field for field in TIME_COLUMNS if field in trigger_fields)
                     displayed_values = {
                         field: (
-                            values[field] if field == "ABSENT" else
+                            absent_difference if field == "ABSENT" else
                             0 if has_combined_extra_bolsa and field == "H. EXTRAS" else
-                            sap_values[SAP_FIELD_BY_TEMPO[field]] - (values["H. EXTRAS"] + values["BOLSA (X%)"])
+                            sap_values.get(SAP_FIELD_BY_TEMPO[field], 0) - (values["H. EXTRAS"] + values["BOLSA (X%)"])
                             if has_combined_extra_bolsa and field == "BOLSA (X%)" else
-                            sap_values[SAP_FIELD_BY_TEMPO[field]] - values[field]
+                            sap_values.get(SAP_FIELD_BY_TEMPO[field], 0) - values[field]
                         )
                         for field in TIME_COLUMNS
                     }
+                    displayed_values.update(red_values)
                     result.append(ComparatorRow(
                         section, code, worker, displayed_values, ordered_triggers,
                         marking_messages, sap_values.get("Trab. Dia"),
                         ("H. EXTRAS",) if has_combined_extra_bolsa else (),
+                        sap_values.get("Trab. Dia", 0) - values["RUIDO"],
+                        tuple(field for field in TIME_COLUMNS if field in red_values),
                     ))
                 if code in sap_duplicates:
                     incidents.append(self._incident("Código SAP duplicado", section, code, worker, sap["worker"], "Código SAP", None, None, None, "El informe SAP contiene más de un total para este código; se ha usado el primero.", values, sap_values))
@@ -789,7 +840,7 @@ class ComparadorTempoService:
         sheet["A1"].fill = PatternFill("solid", fgColor="123283")
         sheet["A1"].alignment = Alignment(horizontal="left")
         sheet.merge_cells(f"A2:{last_column}2")
-        sheet["A2"] = "Δ = SAP − Tempo. Se incluyen diferencias superiores a un minuto, ABSENT de Tempo e incidencias de marcaje SAP."
+        sheet["A2"] = "Δ = SAP − Tempo. En rojo se muestran los controles directos SAP y el diferencial de absentismo; en amarillo, las diferencias superiores a un minuto."
         sheet["A2"].font = Font(italic=True, color="52627A")
         row_index = 4
         for section in sorted({row.section for row in rows}):
@@ -814,29 +865,46 @@ class ComparadorTempoService:
                 daily_cell = sheet.cell(row_index, 3, _minutes_as_excel(item.sap_daily_work_minutes))
                 daily_cell.number_format = "[h]:mm"
                 daily_cell.alignment = Alignment(horizontal="center")
-                for column_index, title in enumerate(COMPARISON_COLUMNS, start=4):
+                daily_difference_cell = sheet.cell(
+                    row_index,
+                    4,
+                    _signed_minutes_text(item.sap_daily_minus_noise_minutes or 0),
+                )
+                daily_difference_cell.alignment = Alignment(horizontal="center")
+                for column_index, title in enumerate(COMPARISON_COLUMNS, start=5):
+                    is_red_control = title in item.red_fields
                     cell = sheet.cell(
                         row_index,
                         column_index,
-                        "-" if title in item.suppressed_fields else _signed_minutes_text(item.values_minutes[title]),
+                        "-" if title in item.suppressed_fields else (
+                            _time_text(item.values_minutes[title])
+                            if is_red_control else _signed_minutes_text(item.values_minutes[title])
+                        ),
                     )
                     cell.alignment = Alignment(horizontal="center")
-                    if title in item.trigger_fields:
+                    if is_red_control:
+                        cell.fill = PatternFill("solid", fgColor="FDE2E1")
+                        cell.font = Font(bold=True, color="9C0006")
+                    elif title in item.trigger_fields:
                         cell.fill = PatternFill("solid", fgColor="FFF4CC")
                         cell.font = Font(bold=True, color="7A4C00")
-                absent_cell = sheet.cell(row_index, len(RESULT_COLUMNS), _minutes_as_excel(item.values_minutes["ABSENT"]))
-                absent_cell.number_format = "[h]:mm"
+                has_absence_control = "ABSENT" in item.red_fields
+                absent_cell = sheet.cell(
+                    row_index,
+                    len(RESULT_COLUMNS),
+                    _signed_minutes_text(item.values_minutes["ABSENT"]) if has_absence_control else "-",
+                )
                 absent_cell.alignment = Alignment(horizontal="center")
-                if "ABSENT" in item.trigger_fields:
-                    absent_cell.fill = PatternFill("solid", fgColor="FFF4CC")
-                    absent_cell.font = Font(bold=True, color="7A4C00")
+                if has_absence_control:
+                    absent_cell.fill = PatternFill("solid", fgColor="FDE2E1")
+                    absent_cell.font = Font(bold=True, color="9C0006")
                 row_index += 1
             row_index += 1
         if not rows:
             sheet.merge_cells(f"A4:{last_column}4")
             sheet["A4"] = "No se han encontrado trabajadores que cumplan las condiciones de comparación."
             sheet["A4"].font = Font(italic=True, color="52627A")
-        widths = (34, 34, 15, 15, 15, 15, 14, 14, 14, 14)
+        widths = (34, 34, 15, 25, 15, 15, 15, 14, 14, 14, 14)
         for index, width in enumerate(widths, start=1):
             sheet.column_dimensions[get_column_letter(index)].width = width
         sheet.freeze_panes = "A4"

@@ -52,6 +52,8 @@ def _row_payload(row: ComparatorRow) -> dict[str, Any]:
         "incidence_messages": list(row.incidence_messages),
         "sap_daily_work_minutes": row.sap_daily_work_minutes,
         "suppressed_fields": list(row.suppressed_fields),
+        "sap_daily_minus_noise_minutes": row.sap_daily_minus_noise_minutes,
+        "red_fields": list(row.red_fields),
     }
 
 

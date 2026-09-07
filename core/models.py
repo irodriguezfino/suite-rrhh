@@ -62,6 +62,8 @@ class ComparatorRow:
     incidence_messages: tuple[str, ...] = ()
     sap_daily_work_minutes: int | None = None
     suppressed_fields: tuple[str, ...] = ()
+    sap_daily_minus_noise_minutes: int | None = None
+    red_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
