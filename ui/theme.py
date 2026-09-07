@@ -56,6 +56,15 @@ def apply_application_style(app) -> None:
         QGroupBox {{ border: 1px solid {COLORS['border']}; border-radius: 10px; margin-top: 12px; padding: 14px; font-weight: 600; color: {COLORS['primary']}; }}
         QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; }}
         QFrame#comparisonSetupCard, QFrame#comparisonProgressCard, QFrame#resultPreviewCard {{ background: #FFFFFF; border: 1px solid {COLORS['border']}; border-radius: 14px; }}
+        QFrame#helpHero {{ background: #EAF0FC; border: 1px solid #C9D8F4; border-radius: 12px; }}
+        QFrame#helpStepCard {{ background: #FFFFFF; border: 1px solid #D7E0F0; border-radius: 10px; }}
+        QFrame#helpFormulaCard {{ background: #F7F9FD; border: 1px solid #D7E0F0; border-radius: 10px; }}
+        QFrame#helpChecklistCard {{ background: #F7F9FD; border: 1px solid #D7E0F0; border-radius: 10px; }}
+        QFrame#helpStateCard {{ background: #FFFFFF; border: 1px solid #D7E0F0; border-radius: 10px; }}
+        QFrame#helpCalloutInfo {{ background: #EEF3FD; border: 1px solid #C9D8F4; border-radius: 9px; }}
+        QFrame#helpCalloutSuccess {{ background: #ECFDF3; border: 1px solid #B9E8CE; border-radius: 9px; }}
+        QFrame#helpCalloutWarning {{ background: #FFF7E9; border: 1px solid #F0D49C; border-radius: 9px; }}
+        QFrame#helpCalloutDanger {{ background: #FFF0F0; border: 1px solid #F0C4C4; border-radius: 9px; }}
         QFrame#comparisonSetupCard {{ min-width: 680px; }}
         QFrame#preparationIntroPanel {{ background: #F4F7FD; border: 1px solid #DCE5F4; border-radius: 11px; }}
         QFrame#sourceSelectionPanel {{ background: #FFFFFF; border: 1px solid #D6E0F2; border-radius: 11px; }}
@@ -106,8 +115,29 @@ def apply_application_style(app) -> None:
         QHeaderView::section {{ background: #EEF3FD; color: {COLORS['primary']}; border: 0; border-bottom: 1px solid {COLORS['border']}; padding: 8px; font-weight: 700; }}
         QProgressBar {{ border: 1px solid {COLORS['border']}; border-radius: 7px; text-align: center; background: #E7EDF8; min-height: 19px; font-weight: 600; }}
         QProgressBar::chunk {{ background: {COLORS['primary']}; border-radius: 5px; }}
+        QTabWidget#comparadorHelpTabs::pane {{ background: #FFFFFF; border: 1px solid {COLORS['border']}; border-radius: 10px; top: -1px; }}
+        QTabWidget#comparadorHelpTabs QTabBar::tab {{ background: #EDF2FA; color: {COLORS['muted']}; border: 1px solid #D7E0F0; border-bottom: 0; border-top-left-radius: 8px; border-top-right-radius: 8px; padding: 9px 14px; margin-right: 3px; font-weight: 600; }}
+        QTabWidget#comparadorHelpTabs QTabBar::tab:selected {{ background: #FFFFFF; color: {COLORS['primary']}; font-weight: 700; }}
+        QTabWidget#comparadorHelpTabs QTabBar::tab:hover {{ background: #E4ECFA; color: {COLORS['primary']}; }}
         QLabel#mutedLabel {{ color: {COLORS['muted']}; }}
         QLabel#pageTitle {{ font-size: 21pt; font-weight: 700; color: {COLORS['text']}; }}
+        QLabel#helpHeroTitle {{ color: {COLORS['primary']}; font-size: 18pt; font-weight: 700; }}
+        QLabel#helpHeroSubtitle {{ color: {COLORS['muted']}; font-size: 11pt; }}
+        QLabel#helpSectionTitle {{ color: {COLORS['primary']}; font-size: 14pt; font-weight: 700; }}
+        QLabel#helpBody {{ color: {COLORS['text']}; }}
+        QLabel#helpStepNumber {{ color: #FFFFFF; background: {COLORS['primary']}; border-radius: 13px; min-width: 26px; max-width: 26px; min-height: 26px; max-height: 26px; font-size: 10pt; font-weight: 800; qproperty-alignment: AlignCenter; }}
+        QLabel#helpCardTitle {{ color: {COLORS['primary']}; font-weight: 700; }}
+        QLabel#helpCardText {{ color: {COLORS['muted']}; font-size: 10pt; }}
+        QLabel#helpCalloutTitle {{ color: {COLORS['primary']}; font-weight: 700; }}
+        QLabel#helpCalloutText {{ color: {COLORS['text']}; font-size: 10pt; }}
+        QLabel#helpFormulaSource {{ color: {COLORS['text']}; background: #FFFFFF; border: 1px solid #D7E0F0; border-radius: 7px; padding: 9px 12px; font-weight: 700; }}
+        QLabel#helpFormulaOperator {{ color: {COLORS['primary']}; font-size: 18pt; font-weight: 700; }}
+        QLabel#helpFormulaResult {{ color: #FFFFFF; background: {COLORS['primary']}; border-radius: 7px; padding: 9px 12px; font-weight: 700; }}
+        QLabel#helpGridHeader {{ color: {COLORS['primary']}; background: #EAF0FC; border-radius: 5px; padding: 7px 8px; font-size: 10pt; font-weight: 700; }}
+        QLabel#helpGridCell {{ color: {COLORS['text']}; border-bottom: 1px solid #E5EAF3; padding: 7px 8px; font-size: 10pt; }}
+        QLabel#helpChecklistItem {{ color: {COLORS['text']}; padding: 3px 0; }}
+        QLabel#helpStateKey {{ color: {COLORS['muted']}; font-size: 10pt; }}
+        QLabel#helpStateValue {{ color: {COLORS['primary']}; font-weight: 700; }}
         QLabel#sectionLabel {{ color: {COLORS['primary']}; font-weight: 700; }}
         QLabel#modeBadge {{ color: {COLORS['primary']}; background: #E6EEFF; border-radius: 9px; padding: 5px 9px; font-size: 9pt; font-weight: 700; }}
         QLabel#stateTitle {{ font-size: 20pt; font-weight: 700; color: {COLORS['text']}; }}

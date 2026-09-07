@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from core.models import ProcessRequest, ProcessResult, ProgressUpdate
 from fase1_recopilacion import EMPLOYMENT_MODE_ACTIVE, PROCESS_MODE_DAILY, PROCESS_MODE_MONTHLY
+from ui.dialogs.control_tempo_help_dialog import ControlTempoHelpDialog
 from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
 from ui.widgets.file_list_widget import FileListWidget
@@ -755,22 +756,13 @@ class Fase1Page(QWidget):
         self._set_status("Proceso cancelado. No se ha generado una salida final.", "statusWarning")
 
     def show_context_help(self) -> None:
-        output = self._normalise_output_path()
-        process = "Mensual 20–20" if self.monthly_radio.isChecked() else "Diario"
-        QMessageBox.information(
-            self,
-            "Ayuda de Control Tempo",
-            "1. Añade uno o varios partes Excel.\n"
-            "2. Revisa fecha y proceso.\n"
-            "3. Indica el archivo de salida.\n"
-            "4. Genera el Control Tempo.\n\n"
-            f"Estado actual:\n"
-            f"• Archivos: {len(self.file_list.files)}\n"
-            f"• Fecha: {self._selected_date():%d/%m/%Y}\n"
-            f"• Proceso: {process}\n"
-            f"• Salida: {output or 'sin definir'}\n\n"
-            f"{self.period_label.text()}",
-        )
+        ControlTempoHelpDialog(
+            file_count=len(self.file_list.files),
+            selected_date=self._selected_date(),
+            is_monthly=self.monthly_radio.isChecked(),
+            output_path=self._normalise_output_path(),
+            parent=self,
+        ).exec()
 
     def _show_details(self) -> None:
         DetailsDialog(self._details or ["Aún no hay detalles de ejecución de Control Tempo."], self).exec()

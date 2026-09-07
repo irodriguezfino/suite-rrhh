@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from core.models import ComparatorIncident, ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
 from services.comparador_tempo_service import RESULT_COLUMNS, TIME_COLUMNS
+from ui.dialogs.comparador_tempo_help_dialog import ComparadorTempoHelpDialog
 from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
 
@@ -863,7 +864,7 @@ class ComparadorTempoPage(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_result.output_path.parent)))
 
     def show_context_help(self) -> None:
-        QMessageBox.information(self, "Ayuda del Comparador de Tempo", "1. Selecciona el Excel de Acumulado con sus filtros ya definidos.\n2. Selecciona el Excel Tempo SAP.\n3. Pulsa Comprobar datos y elige el Excel de salida.\n4. Consulta el resultado y el Excel independiente de incidencias.\n\nLas columnas Δ muestran SAP − Acumulado. ABSENT compara SAP 1052-HDESC − Acumulado cuando existe absentismo; los controles SAP directos se muestran en rojo. Se compara por código SAP y se admite una diferencia de hasta un minuto.")
+        ComparadorTempoHelpDialog(self).exec()
 
     def request_leave(self) -> bool:
         if not self.is_running:
