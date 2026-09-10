@@ -764,16 +764,6 @@ class ComparadorTempoService:
                         "La sección no debe tener NOCTUR en Tempo (1014-HNOC); se muestra el valor Tempo para revisión.",
                         values, sap_values,
                     ))
-                if sap_values.get("1146-PPEN", 0) != 0:
-                    red_values["PENOS"] = sap_values["1146-PPEN"]
-                    incidents.append(self._incident(
-                        "Control especial Tempo", section, code, worker, sap["worker"], "PENOS",
-                        values["PENOS"], sap_values["1146-PPEN"],
-                        sap_values["1146-PPEN"] - values["PENOS"],
-                        "Tempo tiene PENOS (1146-PPEN); se muestra el valor Tempo para revisión.",
-                        values, sap_values,
-                    ))
-
                 absent_sap_minutes = sap_values.get("1052-HDESC", 0)
                 absent_difference = absent_sap_minutes - values["ABSENT"]
                 has_absence = absent_sap_minutes != 0 or values["ABSENT"] != 0

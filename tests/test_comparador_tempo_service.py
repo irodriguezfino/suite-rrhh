@@ -178,7 +178,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertTrue(sheet.cell(6, 4).fill.fgColor.rgb.endswith("FFF4CC"))
             workbook.close()
 
-    def test_special_sap_controls_and_absence_are_included_in_red(self) -> None:
+    def test_special_tempo_controls_and_absence_are_included_in_red(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             tempo, sap, output = root / "tempo.xlsx", root / "sap.xls", root / "resultado.xlsx"
@@ -220,10 +220,12 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertEqual(by_worker["Ana"].values_minutes["NOCTUR"], 45)
             self.assertIn("NOCTUR", by_worker["Ana"].red_fields)
             self.assertEqual(by_worker["Pepa"].values_minutes["PENOS"], 15)
-            self.assertIn("PENOS", by_worker["Pepa"].red_fields)
+            self.assertIn("PENOS", by_worker["Pepa"].trigger_fields)
+            self.assertNotIn("PENOS", by_worker["Pepa"].red_fields)
             self.assertEqual(by_worker["Berta"].values_minutes["ABSENT"], 0)
             self.assertEqual(by_worker["Berta"].red_fields, ("ABSENT",))
             self.assertTrue(any(item.incident_type == "Control especial Tempo" for item in result.incidents))
+            self.assertTrue(any(item.incident_type == "Diferencia" and item.field == "PENOS" for item in result.incidents))
             self.assertTrue(any(item.incident_type == "Absentismo" for item in result.incidents))
 
             workbook = load_workbook(output)
@@ -231,9 +233,10 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             worker_rows = {
                 str(sheet.cell(row_number, 1).value): row_number
                 for row_number in range(1, sheet.max_row + 1)
-                if sheet.cell(row_number, 1).value in {"Marta", "Berta"}
+                if sheet.cell(row_number, 1).value in {"Marta", "Pepa", "Berta"}
             }
             marta_header = worker_rows["Marta"] - 1
+            pepa_header = worker_rows["Pepa"] - 1
             berta_header = worker_rows["Berta"] - 1
             marta_columns = {
                 str(sheet.cell(marta_header, column).value): column
@@ -243,11 +246,18 @@ class ComparadorTempoServiceTests(unittest.TestCase):
                 str(sheet.cell(berta_header, column).value): column
                 for column in range(1, sheet.max_column + 1)
             }
+            pepa_columns = {
+                str(sheet.cell(pepa_header, column).value): column
+                for column in range(1, sheet.max_column + 1)
+            }
             ruido_cell = sheet.cell(worker_rows["Marta"], marta_columns["Δ RUIDO"])
+            penos_cell = sheet.cell(worker_rows["Pepa"], pepa_columns["Δ PENOS"])
             absent_cell = sheet.cell(worker_rows["Berta"], berta_columns["ABSENT"])
             self.assertEqual(ruido_cell.value, "0:30")
+            self.assertEqual(penos_cell.value, "+0:15")
             self.assertEqual(absent_cell.value, "0:00")
             self.assertTrue(ruido_cell.fill.fgColor.rgb.endswith("FDE2E1"))
+            self.assertTrue(penos_cell.fill.fgColor.rgb.endswith("FFF4CC"))
             self.assertTrue(absent_cell.fill.fgColor.rgb.endswith("FDE2E1"))
             workbook.close()
 

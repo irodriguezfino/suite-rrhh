@@ -176,7 +176,7 @@ class ComparadorTempoHelpDialog(QDialog):
                 ("Δ HFJ (15%)", "1129-HE15% Tempo − HFJ PM.", "0:00 − 0:20 = −0:20"),
                 ("Δ BOLSA (X%)", "1166-HE35% Tempo − BOLSA PM.", "2:00 − 1:45 = +0:15"),
                 ("Δ NOCTUR", "1014-HNOC Tempo − NOCTUR PM.", "4:00 − 3:30 = +0:30"),
-                ("Δ PENOS", "1146-PPEN Tempo − PENOS PM, salvo control rojo.", "0:00 − 0:30 = −0:30"),
+                ("Δ PENOS", "1146-PPEN Tempo − PENOS PM.", "0:00 − 0:30 = −0:30"),
                 ("Δ RUIDO", "1153-PRUI Tempo − RUIDO PM, salvo control rojo.", "0:30 − 0:45 = −0:15"),
                 ("ABSENT", "1052-HDESC Tempo − ABSENT PM, solo si existe absentismo.", "8:00 − 8:00 = 0:00"),
             )
@@ -215,10 +215,10 @@ class ComparadorTempoHelpDialog(QDialog):
                 "danger",
             ))
             layout.addWidget(self._callout(
-                "Penosidad en Tempo",
-                "Si Tempo contiene 1146-PPEN en cualquier sección, Δ PENOS muestra directamente ese valor en rojo. "
-                "Si Tempo está a cero, la columna vuelve a mostrar la diferencia normal con Partes Mensuales.",
-                "danger",
+                "Penosidad",
+                "Δ PENOS se calcula siempre como 1146-PPEN Tempo − PENOS PM. Se resalta en amarillo cuando "
+                "la diferencia supera un minuto.",
+                "warning",
             ))
             layout.addWidget(self._callout(
                 "Rojo no siempre significa una diferencia",
@@ -242,7 +242,7 @@ class ComparadorTempoHelpDialog(QDialog):
             for text in (
                 "✓ Una diferencia normal superior a un minuto.",
                 "✓ Una diferencia de Control superior a un minuto: Trab. Día Tempo − RUIDO PM.",
-                "✓ Un control directo Tempo mostrado en rojo: ruido, nocturnidad o penosidad.",
+                "✓ Un control directo Tempo mostrado en rojo: ruido o nocturnidad.",
                 "✓ Absentismo en Tempo o en Partes Mensuales, aunque la diferencia final sea 0:00.",
                 "✓ Falta de fichaje de entrada o de salida.",
             ):
