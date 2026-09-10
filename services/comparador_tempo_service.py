@@ -40,7 +40,7 @@ TIME_COLUMNS = (
 )
 COMPARISON_COLUMNS = TIME_COLUMNS[:-1]
 RESULT_COLUMNS = (
-    "Trabajador", "Incidencias", "Trab. Día SAP", "Δ Trab. Día SAP − RUIDO Acumulado",
+    "Trabajador", "Incidencias", "Trab. Día Tempo", "Control",
     *[f"Δ {field}" for field in COMPARISON_COLUMNS], "ABSENT",
 )
 SAP_FIELD_BY_TEMPO = {
@@ -235,20 +235,20 @@ class ComparadorTempoService:
 
         request = ComparatorRequest(Path(request.tempo_path), Path(request.sap_path), Path(request.output_path))
         self._validate_request(request)
-        report("Leyendo la relación de trabajadores de Tempo…", 0, 8)
+        report("Leyendo la relación de trabajadores de Partes Mensuales…", 0, 8)
         identity_map, identity_issues = self._identity_loader(request.tempo_path)
         check_cancel()
 
         def tempo_progress(label: str, current: int, total: int) -> None:
-            report(f"Leyendo sección {label} de Tempo…", 1 + current, max(total + 4, 8))
+            report(f"Leyendo sección {label} de Partes Mensuales…", 1 + current, max(total + 4, 8))
 
-        report("Abriendo la tabla dinámica de Tempo sin modificar el original…", 1, 8)
+        report("Abriendo la tabla dinámica de Partes Mensuales sin modificar el original…", 1, 8)
         tempo_sections = self._tempo_reader(request.tempo_path, cancelled, tempo_progress)
         check_cancel()
-        report("Leyendo totales del informe SAP…", 4, 8)
+        report("Leyendo totales del Excel Tempo…", 4, 8)
         sap_workers, sap_duplicates = self._sap_reader(request.sap_path)
         check_cancel()
-        report("Comparando códigos y acumulados…", 5, 8)
+        report("Comparando códigos y Partes Mensuales…", 5, 8)
         rows, incidents = self._compare(tempo_sections, identity_map, identity_issues, sap_workers, sap_duplicates, check_cancel)
         check_cancel()
         report("Generando Excel de resultado e incidencias…", 6, 8, rows=len(rows), event="writing")
@@ -260,7 +260,7 @@ class ComparadorTempoService:
             f"Trabajadores incluidos en resultado: {len(rows)}",
             f"Incidencias de auditoría: {len(incidents)}",
             f"Tolerancia de comparación: {TOLERANCE_MINUTES} minuto.",
-            "Se conservaron los filtros ya configurados en la tabla dinámica de Tempo.",
+            "Se conservaron los filtros ya configurados en la tabla dinámica de Partes Mensuales.",
         )
         if output_path != request.output_path or incidents_path != requested_incidents_path:
             detail += ("Algún archivo de salida estaba bloqueado; se guardó una copia recuperada con un nombre alternativo.",)
@@ -278,7 +278,7 @@ class ComparadorTempoService:
 
     @staticmethod
     def _validate_request(request: ComparatorRequest) -> None:
-        for label, path in (("El Excel de Tempo", request.tempo_path), ("El informe SAP", request.sap_path)):
+        for label, path in (("El Excel de Partes Mensuales", request.tempo_path), ("El Excel Tempo", request.sap_path)):
             if not path.is_file():
                 raise FileNotFoundError(f"{label} no existe o no está disponible: {path}")
         if request.tempo_path.resolve() == request.output_path.resolve() or request.sap_path.resolve() == request.output_path.resolve():
@@ -287,7 +287,7 @@ class ComparadorTempoService:
             raise ValueError("El resultado debe guardarse como archivo .xlsx.")
         if request.sap_path.suffix.lower() not in {".xls", ".xml", ".xlsx", ".xlsm"}:
             raise ValueError(
-                "El informe SAP debe ser un Excel XML (.xls o .xml) o un libro moderno (.xlsx o .xlsm)."
+                "El Excel Tempo debe ser un Excel XML (.xls o .xml) o un libro moderno (.xlsx o .xlsm)."
             )
 
     def _load_tempo_identities(self, path: Path) -> tuple[dict[str, dict[str, set[str]]], list[ComparatorIncident]]:
@@ -295,21 +295,21 @@ class ComparadorTempoService:
             workbook = load_workbook(path, read_only=True, data_only=True)
         except PermissionError as exc:
             raise RuntimeError(
-                "No se puede leer el Excel de Tempo porque está abierto o bloqueado. "
+                "No se puede leer el Excel de Partes Mensuales porque está abierto o bloqueado. "
                 "Ciérralo en Excel o selecciona una copia antes de comparar."
             ) from exc
         try:
             if TEMPO_DATA_SHEET not in workbook.sheetnames:
-                raise ValueError(f"No se encontró la hoja {TEMPO_DATA_SHEET!r} en el Excel de Tempo.")
+                    raise ValueError(f"No se encontró la hoja {TEMPO_DATA_SHEET!r} en el Excel de Partes Mensuales.")
             sheet = workbook[TEMPO_DATA_SHEET]
             rows = sheet.iter_rows(values_only=True)
             headers = next(rows, None)
             if not headers:
-                raise ValueError("La hoja DATOS de Tempo no tiene cabeceras.")
+                raise ValueError("La hoja DATOS de Partes Mensuales no tiene cabeceras.")
             positions = {_normalise_header(value): index for index, value in enumerate(headers)}
             for header in ("SECCION", "SAP", "TRABAJADOR"):
                 if header not in positions:
-                    raise ValueError(f"La hoja DATOS de Tempo no contiene la columna {header!r}.")
+                    raise ValueError(f"La hoja DATOS de Partes Mensuales no contiene la columna requerida {header!r}.")
             identities: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
             for row in rows:
                 section = _normalise_text(row[positions["SECCION"]] if positions["SECCION"] < len(row) else "")
@@ -347,7 +347,7 @@ class ComparadorTempoService:
                 try:
                     sheet = workbook.Worksheets(TEMPO_SHEET)
                 except Exception as exc:
-                    raise ValueError(f"No se encontró la hoja {TEMPO_SHEET!r} en el Excel de Tempo.") from exc
+                    raise ValueError(f"No se encontró la hoja {TEMPO_SHEET!r} en el Excel de Partes Mensuales.") from exc
                 if sheet.PivotTables().Count < 1:
                     raise ValueError("La hoja PARALELO NUEVO no contiene una tabla dinámica utilizable.")
                 pivot = sheet.PivotTables(1)
@@ -355,7 +355,7 @@ class ComparadorTempoService:
                 slicer_cache = self._find_section_slicer_cache(workbook, pivot)
                 section_names = self._slicer_sections(slicer_cache) if slicer_cache is not None else self._pivot_sections(field)
                 if not section_names:
-                    raise ValueError("No se han encontrado secciones en la tabla dinámica de Tempo.")
+                    raise ValueError("No se han encontrado secciones en la tabla dinámica de Partes Mensuales.")
                 if slicer_cache is not None:
                     # Los trabajadores del libro están asociados de forma
                     # única a sección y código SAP en DATOS. Mostrar todo el
@@ -489,7 +489,7 @@ class ComparadorTempoService:
             # controlan por TimelineCache independiente y permanecen intactas.
             slicer_cache.ClearManualFilter()
         except Exception as exc:
-            raise RuntimeError("No se pudieron mostrar todas las secciones de la segmentación de Tempo.") from exc
+            raise RuntimeError("No se pudieron mostrar todas las secciones de la segmentación de Partes Mensuales.") from exc
 
     @staticmethod
     def _rows_from_pivot(matrix: list[list[object]]) -> list[dict]:
@@ -526,7 +526,7 @@ class ComparadorTempoService:
             root = ET.parse(path).getroot()
         except (ET.ParseError, OSError) as exc:
             raise ValueError(
-                "El informe SAP debe ser un Excel XML 2003 (.xls o .xml) legible, "
+                "El Excel Tempo debe ser un Excel XML 2003 (.xls o .xml) legible, "
                 "o un libro moderno .xlsx."
             ) from exc
         rows = root.findall(f".//{XML_NS}Worksheet/{XML_NS}Table/{XML_NS}Row")
@@ -541,11 +541,11 @@ class ComparadorTempoService:
             workbook = load_workbook(path, read_only=True, data_only=True)
         except PermissionError as exc:
             raise RuntimeError(
-                "No se puede leer el Excel Tempo SAP porque está abierto o bloqueado. "
+                "No se puede leer el Excel Tempo porque está abierto o bloqueado. "
                 "Ciérralo en Excel o selecciona una copia antes de comparar."
             ) from exc
         except (OSError, ValueError, zipfile.BadZipFile) as exc:
-            raise ValueError("El informe SAP .xlsx no es legible o está dañado.") from exc
+            raise ValueError("El Excel Tempo .xlsx no es legible o está dañado.") from exc
 
         missing_columns_error: ValueError | None = None
         try:
@@ -556,7 +556,7 @@ class ComparadorTempoService:
                         for row in sheet.iter_rows(values_only=True)
                     )
                 except ValueError as exc:
-                    if "No se localizaron las columnas SAP necesarias" not in str(exc):
+                    if "No se localizaron las columnas Tempo necesarias" not in str(exc):
                         raise
                     missing_columns_error = exc
         finally:
@@ -564,7 +564,7 @@ class ComparadorTempoService:
 
         if missing_columns_error is not None:
             raise missing_columns_error
-        raise ValueError("El informe SAP .xlsx no contiene hojas legibles.")
+        raise ValueError("El Excel Tempo .xlsx no contiene hojas legibles.")
 
     @staticmethod
     def _read_sap_totals_from_rows(
@@ -587,7 +587,7 @@ class ComparadorTempoService:
                     headers = {value: by_header[_normalise_header(value)] for value in SAP_COLUMNS}
                     marks = [column for column, value in values.items() if _normalise_header(value) == "MARCAJES"]
                     if len(marks) < 2:
-                        raise ValueError("No se localizaron las dos columnas de marcajes del informe SAP.")
+                        raise ValueError("No se localizaron las dos columnas de marcajes del Excel Tempo.")
                     mark_columns = (marks[0], marks[1])
                 continue
             label = _normalise_text(values.get(2, ""))
@@ -628,9 +628,9 @@ class ComparadorTempoService:
                     marking_incidents[current_worker[0]].append(message)
         if headers is None:
             expected = ", ".join(SAP_COLUMNS)
-            raise ValueError(f"No se localizaron las columnas SAP necesarias: {expected}.")
+            raise ValueError(f"No se localizaron las columnas Tempo necesarias: {expected}.")
         if not totals:
-            raise ValueError("No se localizaron los totales por trabajador en el informe SAP.")
+            raise ValueError("No se localizaron los totales por trabajador en el Excel Tempo.")
         return totals, duplicate_codes
 
     @staticmethod
@@ -685,19 +685,19 @@ class ComparadorTempoService:
                         section, code = next(iter(candidates))
                         codes = {code}
                 if len(codes) != 1:
-                    reason = "No se encontró un código SAP único para el trabajador en DATOS de Tempo."
+                    reason = "No se encontró un código Tempo único para el trabajador en DATOS de Partes Mensuales."
                     if source_section:
                         if len(codes) > 1:
-                            reason = "El trabajador tiene varios códigos SAP posibles en DATOS de Tempo."
+                            reason = "El trabajador tiene varios códigos Tempo posibles en DATOS de Partes Mensuales."
                     else:
-                        reason = "El trabajador no tiene una combinación única de sección y código SAP en DATOS de Tempo."
-                    incidents.append(self._incident("Identidad no verificable", section, "", worker, "", "Código SAP", None, None, None, reason, values, {}))
+                        reason = "El trabajador no tiene una combinación única de sección y código Tempo en DATOS de Partes Mensuales."
+                    incidents.append(self._incident("Identidad no verificable", section, "", worker, "", "Código Tempo", None, None, None, reason, values, {}))
                     continue
                 code = next(iter(codes))
                 seen_tempo_codes.add(code)
                 sap = sap_workers.get(code)
                 if sap is None:
-                    incidents.append(self._incident("Solo en Tempo", section, code, worker, "", "Código SAP", None, None, None, "El código SAP de Tempo no existe en el informe SAP.", values, {}))
+                    incidents.append(self._incident("Solo en Partes Mensuales", section, code, worker, "", "Código Tempo", None, None, None, "El código Tempo de Partes Mensuales no existe en el Excel Tempo.", values, {}))
                     continue
                 matched_codes.add(code)
                 sap_values = dict(sap["values"])
@@ -726,40 +726,51 @@ class ComparadorTempoService:
                     if has_combined_extra_bolsa and tempo_field == "BOLSA (X%)":
                         compared_tempo_minutes = values["H. EXTRAS"] + values["BOLSA (X%)"]
                         comparison_name = "BOLSA (X%) · H. EXTRAS + BOLSA (X%)"
-                        reason_prefix = "En esta sección se compara SAP 1166-HE35% con Tempo H. EXTRAS + BOLSA (X%). "
-                    # La salida y la auditoría expresan siempre SAP menos Tempo.
+                        reason_prefix = "En esta sección se compara Tempo 1166-HE35% con PM H. EXTRAS + BOLSA (X%). "
+                    # La salida y la auditoría expresan siempre Tempo menos Partes Mensuales.
                     difference = sap_values.get(sap_field, 0) - compared_tempo_minutes
                     if abs(difference) > TOLERANCE_MINUTES:
                         mismatches.append((tempo_field, compared_tempo_minutes, sap_values.get(sap_field, 0), difference))
                         trigger_fields.add(tempo_field)
                         incidents.append(self._incident("Diferencia", section, code, worker, sap["worker"], comparison_name, compared_tempo_minutes, sap_values.get(sap_field, 0), difference, f"{reason_prefix}La diferencia supera {TOLERANCE_MINUTES} minuto.", values, sap_values))
 
+                control_difference = sap_values.get("Trab. Dia", 0) - values["RUIDO"]
+                control_requires_review = abs(control_difference) > TOLERANCE_MINUTES
+                if control_requires_review:
+                    trigger_fields.add("Control")
+                    incidents.append(self._incident(
+                        "Diferencia", section, code, worker, sap["worker"], "Control",
+                        values["RUIDO"], sap_values.get("Trab. Dia", 0), control_difference,
+                        f"Control: Trab. Día Tempo − RUIDO PM. La diferencia supera {TOLERANCE_MINUTES} minuto.",
+                        values, sap_values,
+                    ))
+
                 red_values: dict[str, int] = {}
                 if has_special_noise_rule and sap_values.get("1153-PRUI", 0) != 0:
                     red_values["RUIDO"] = sap_values["1153-PRUI"]
                     incidents.append(self._incident(
-                        "Control especial SAP", section, code, worker, sap["worker"], "RUIDO",
+                        "Control especial Tempo", section, code, worker, sap["worker"], "RUIDO",
                         values["RUIDO"], sap_values["1153-PRUI"],
                         sap_values["1153-PRUI"] - values["RUIDO"],
-                        "La sección no debe tener RUIDO en SAP (1153-PRUI); se muestra el valor SAP para revisión.",
+                        "La sección no debe tener RUIDO en Tempo (1153-PRUI); se muestra el valor Tempo para revisión.",
                         values, sap_values,
                     ))
                 if has_special_nocturnity_rule and sap_values.get("1014-HNOC", 0) != 0:
                     red_values["NOCTUR"] = sap_values["1014-HNOC"]
                     incidents.append(self._incident(
-                        "Control especial SAP", section, code, worker, sap["worker"], "NOCTUR",
+                        "Control especial Tempo", section, code, worker, sap["worker"], "NOCTUR",
                         values["NOCTUR"], sap_values["1014-HNOC"],
                         sap_values["1014-HNOC"] - values["NOCTUR"],
-                        "La sección no debe tener NOCTUR en SAP (1014-HNOC); se muestra el valor SAP para revisión.",
+                        "La sección no debe tener NOCTUR en Tempo (1014-HNOC); se muestra el valor Tempo para revisión.",
                         values, sap_values,
                     ))
                 if sap_values.get("1146-PPEN", 0) != 0:
                     red_values["PENOS"] = sap_values["1146-PPEN"]
                     incidents.append(self._incident(
-                        "Control especial SAP", section, code, worker, sap["worker"], "PENOS",
+                        "Control especial Tempo", section, code, worker, sap["worker"], "PENOS",
                         values["PENOS"], sap_values["1146-PPEN"],
                         sap_values["1146-PPEN"] - values["PENOS"],
-                        "SAP tiene PENOS (1146-PPEN); se muestra el valor SAP para revisión.",
+                        "Tempo tiene PENOS (1146-PPEN); se muestra el valor Tempo para revisión.",
                         values, sap_values,
                     ))
 
@@ -771,7 +782,7 @@ class ComparadorTempoService:
                     incidents.append(self._incident(
                         "Absentismo", section, code, worker, sap["worker"], "ABSENT",
                         values["ABSENT"], absent_sap_minutes, absent_difference,
-                        "Se muestra la diferencia SAP 1052-HDESC − ABSENT Tempo, incluso cuando es cero.",
+                        "Se muestra la diferencia Tempo 1052-HDESC − ABSENT PM, incluso cuando es cero.",
                         values, sap_values,
                     ))
                 for message in marking_messages:
@@ -781,8 +792,8 @@ class ComparadorTempoService:
                 # el resultado si no hay nada que revisar. Un fichaje faltante
                 # siempre requiere revisión y sí conserva su fila.
                 missing_marking = any(message in MISSING_MARKING_MESSAGES for message in marking_messages)
-                if red_values or mismatches or missing_marking:
-                    ordered_triggers = tuple(field for field in TIME_COLUMNS if field in trigger_fields)
+                if red_values or mismatches or control_requires_review or missing_marking:
+                    ordered_triggers = tuple(field for field in ("Control", *TIME_COLUMNS) if field in trigger_fields)
                     displayed_values = {
                         field: (
                             absent_difference if field == "ABSENT" else
@@ -798,16 +809,16 @@ class ComparadorTempoService:
                         section, code, worker, displayed_values, ordered_triggers,
                         marking_messages, sap_values.get("Trab. Dia"),
                         ("H. EXTRAS",) if has_combined_extra_bolsa else (),
-                        sap_values.get("Trab. Dia", 0) - values["RUIDO"],
+                        control_difference,
                         tuple(field for field in TIME_COLUMNS if field in red_values),
                     ))
                 if code in sap_duplicates:
-                    incidents.append(self._incident("Código SAP duplicado", section, code, worker, sap["worker"], "Código SAP", None, None, None, "El informe SAP contiene más de un total para este código; se ha usado el primero.", values, sap_values))
+                    incidents.append(self._incident("Código Tempo duplicado", section, code, worker, sap["worker"], "Código Tempo", None, None, None, "El Excel Tempo contiene más de un total para este código; se ha usado el primero.", values, sap_values))
         for code, sap in sorted(sap_workers.items()):
             if code not in seen_tempo_codes:
-                incidents.append(self._incident("Solo en SAP", "", code, "", sap["worker"], "Código SAP", None, None, None, "El código SAP no aparece en la tabla dinámica Tempo con sus filtros actuales.", {}, sap["values"]))
+                incidents.append(self._incident("Solo en Tempo", "", code, "", sap["worker"], "Código Tempo", None, None, None, "El código Tempo no aparece en la tabla dinámica de Partes Mensuales con sus filtros actuales.", {}, sap["values"]))
             if code in sap_duplicates and code not in matched_codes:
-                incidents.append(self._incident("Código SAP duplicado", "", code, "", sap["worker"], "Código SAP", None, None, None, "El informe SAP contiene más de un total para este código; se ha usado el primero.", {}, sap["values"]))
+                incidents.append(self._incident("Código Tempo duplicado", "", code, "", sap["worker"], "Código Tempo", None, None, None, "El Excel Tempo contiene más de un total para este código; se ha usado el primero.", {}, sap["values"]))
         result.sort(key=lambda item: (item.section, _worker_key(item.worker), item.sap_code))
         return result, incidents
 
@@ -840,7 +851,7 @@ class ComparadorTempoService:
         sheet["A1"].fill = PatternFill("solid", fgColor="123283")
         sheet["A1"].alignment = Alignment(horizontal="left")
         sheet.merge_cells(f"A2:{last_column}2")
-        sheet["A2"] = "Δ = SAP − Tempo. En rojo se muestran los controles directos SAP y el diferencial de absentismo; en amarillo, las diferencias superiores a un minuto."
+        sheet["A2"] = "Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM. En rojo se muestran los controles directos Tempo y el diferencial de absentismo; en amarillo, las diferencias superiores a un minuto."
         sheet["A2"].font = Font(italic=True, color="52627A")
         row_index = 4
         for section in sorted({row.section for row in rows}):
@@ -871,6 +882,9 @@ class ComparadorTempoService:
                     _signed_minutes_text(item.sap_daily_minus_noise_minutes or 0),
                 )
                 daily_difference_cell.alignment = Alignment(horizontal="center")
+                if "Control" in item.trigger_fields:
+                    daily_difference_cell.fill = PatternFill("solid", fgColor="FFF4CC")
+                    daily_difference_cell.font = Font(bold=True, color="7A4C00")
                 for column_index, title in enumerate(COMPARISON_COLUMNS, start=5):
                     is_red_control = title in item.red_fields
                     cell = sheet.cell(
@@ -916,10 +930,10 @@ class ComparadorTempoService:
         sheet.title = "Incidencias"
         sheet.sheet_view.showGridLines = False
         headers = (
-            "Tipo", "Sección", "Código SAP", "Trabajador Partes mensuales", "Trabajador SAP",
+            "Tipo", "Sección", "Código Tempo", "Trabajador Partes mensuales", "Trabajador Tempo",
             *[f"Partes mensuales · {field}" for field in TIME_COLUMNS],
-            *[f"SAP · {field}" for field in SAP_COLUMNS],
-            "Campo", "Valor Partes mensuales", "Valor SAP", "Diferencia (min)", "Motivo",
+            *[f"Tempo · {field}" for field in SAP_COLUMNS],
+            "Campo", "Valor Partes mensuales", "Valor Tempo", "Diferencia (min)", "Motivo",
         )
         for column, title in enumerate(headers, start=1):
             cell = sheet.cell(1, column, title)

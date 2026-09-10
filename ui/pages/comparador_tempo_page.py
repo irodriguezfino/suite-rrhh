@@ -72,7 +72,7 @@ class ComparadorTempoPage(QWidget):
         title = QLabel("Comparador de Tempo")
         title.setObjectName("pageTitle")
         heading.addWidget(title)
-        self.subtitle_label = QLabel("Contrasta el Excel de Acumulado y el Excel Tempo SAP por código de trabajador, manteniendo el periodo elegido.")
+        self.subtitle_label = QLabel("Contrasta el Excel de Partes Mensuales y el Excel Tempo por código de trabajador, manteniendo el periodo elegido.")
         self.subtitle_label.setObjectName("mutedLabel")
         self.subtitle_label.setWordWrap(True)
         heading.addWidget(self.subtitle_label)
@@ -131,7 +131,7 @@ class ComparadorTempoPage(QWidget):
         steps = QVBoxLayout()
         steps.setSpacing(8)
         self.preparation_steps: list[QLabel] = []
-        for number, text in (("1", "Selecciona acumulado"), ("2", "Añade Tempo SAP"), ("3", "Comprueba datos")):
+        for number, text in (("1", "Selecciona Partes Mensuales"), ("2", "Añade Tempo"), ("3", "Comprueba datos")):
             step = QLabel(f"{number}  {text}")
             step.setObjectName("comparisonStep")
             step.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -153,8 +153,9 @@ class ComparadorTempoPage(QWidget):
         summary_layout.addWidget(summary_title)
         summary_text = QLabel(
             "• Se muestran solo los trabajadores que requieren revisión.\n"
-            "• Cada columna Δ calcula: tiempo SAP − tiempo del Acumulado.\n"
-            "• ABSENT muestra SAP 1052-HDESC − Acumulado cuando existe absentismo; los controles SAP directos se resaltan en rojo."
+            "• Cada columna Δ calcula: tiempo Tempo − tiempo de Partes Mensuales.\n"
+            "• Control calcula Trab. Día Tempo − RUIDO PM y se resalta en amarillo cuando supera un minuto.\n"
+            "• ABSENT muestra Tempo 1052-HDESC − PM cuando existe absentismo; los controles directos Tempo se resaltan en rojo."
         )
         summary_text.setObjectName("summaryCardText")
         summary_text.setWordWrap(True)
@@ -174,21 +175,21 @@ class ComparadorTempoPage(QWidget):
         source_hint.setObjectName("mutedLabel")
         source_layout.addWidget(source_hint)
         self.tempo_edit = QLineEdit(self.inputs_group)
-        self.tempo_edit.setAccessibleName("Ruta del Excel de Acumulado")
+        self.tempo_edit.setAccessibleName("Ruta del Excel de Partes Mensuales")
         self.tempo_edit.setVisible(False)
         self.tempo_edit.textChanged.connect(self._update_state)
         self.sap_edit = QLineEdit(self.inputs_group)
-        self.sap_edit.setAccessibleName("Ruta del Excel Tempo SAP")
+        self.sap_edit.setAccessibleName("Ruta del Excel Tempo")
         self.sap_edit.setVisible(False)
         self.sap_edit.textChanged.connect(self._update_state)
-        tempo_card, self.tempo_file_name, self.tempo_file_location, self.tempo_file_status, self.tempo_button = self._source_selector_card("Excel de Acumulado", "Tabla dinámica con el periodo seleccionado", self._choose_tempo)
-        sap_card, self.sap_file_name, self.sap_file_location, self.sap_file_status, self.sap_button = self._source_selector_card("Excel Tempo SAP", "Exportación SAP de tiempos por trabajador (.xls o .xlsx)", self._choose_sap)
+        tempo_card, self.tempo_file_name, self.tempo_file_location, self.tempo_file_status, self.tempo_button = self._source_selector_card("Excel de Partes Mensuales", "Tabla dinámica con el periodo seleccionado", self._choose_tempo)
+        sap_card, self.sap_file_name, self.sap_file_location, self.sap_file_status, self.sap_button = self._source_selector_card("Excel Tempo", "Exportación Tempo de tiempos por trabajador (.xls o .xlsx)", self._choose_sap)
         source_layout.addWidget(tempo_card)
         source_layout.addWidget(sap_card)
         self.preparation_body.addWidget(source_panel, 4)
         card.addLayout(self.preparation_body)
 
-        self.inputs_helper = QLabel("Los filtros de fecha existentes en el Acumulado se respetan. La comparación se realiza por código SAP y los archivos originales no se modifican.")
+        self.inputs_helper = QLabel("Los filtros de fecha existentes en Partes Mensuales se respetan. La comparación se realiza por código Tempo y los archivos originales no se modifican.")
         self.inputs_helper.setObjectName("mutedLabel")
         self.inputs_helper.setWordWrap(True)
         self.inputs_helper.setAlignment(Qt.AlignLeft)
@@ -198,7 +199,7 @@ class ComparadorTempoPage(QWidget):
         controls.addStretch(1)
         self.compare_button = QPushButton("Comprobar datos")
         self.compare_button.setObjectName("primaryButton")
-        self.compare_button.setAccessibleName("Comprobar datos de Tempo y SAP")
+        self.compare_button.setAccessibleName("Comprobar datos de Partes Mensuales y Tempo")
         self.compare_button.clicked.connect(self._start)
         self.clear_button = QPushButton("Limpiar")
         self.clear_button.setAccessibleName("Limpiar archivos y resultados del Comparador de Tempo")
@@ -316,7 +317,7 @@ class ComparadorTempoPage(QWidget):
         self.processing_steps_layout.addLayout(left_steps, 1)
         self.processing_steps_layout.addLayout(right_steps, 1)
         self.processing_steps: list[tuple[int, QLabel, QLabel]] = []
-        for index, (threshold, text) in enumerate(((1, "Preparar relación de trabajadores"), (3, "Leer la tabla dinámica de Tempo"), (5, "Leer y normalizar el informe SAP"), (6, "Comparar acumulados e incidencias"), (8, "Generar los dos Excel de salida"))):
+        for index, (threshold, text) in enumerate(((1, "Preparar relación de trabajadores"), (3, "Leer la tabla dinámica de Partes Mensuales"), (5, "Leer y normalizar el Excel Tempo"), (6, "Comparar Partes Mensuales e incidencias"), (8, "Generar los dos Excel de salida"))):
             row = QHBoxLayout()
             label = QLabel(text)
             label.setObjectName("processingStep")
@@ -454,8 +455,8 @@ class ComparadorTempoPage(QWidget):
 
     def _update_source_presentation(self) -> None:
         for edit, filename, location, status, prefix in (
-            (self.tempo_edit, self.tempo_file_name, self.tempo_file_location, self.tempo_file_status, "Tempo"),
-            (self.sap_edit, self.sap_file_name, self.sap_file_location, self.sap_file_status, "SAP"),
+            (self.tempo_edit, self.tempo_file_name, self.tempo_file_location, self.tempo_file_status, "Partes Mensuales"),
+            (self.sap_edit, self.sap_file_name, self.sap_file_location, self.sap_file_status, "Tempo"),
         ):
             raw = edit.text().strip()
             if raw:
@@ -475,11 +476,11 @@ class ComparadorTempoPage(QWidget):
                 status.setObjectName("fileStatusPending")
             status.style().unpolish(status)
             status.style().polish(status)
-        tempo_name = Path(self.tempo_edit.text()).name if self.tempo_edit.text().strip() else "Tempo pendiente"
-        sap_name = Path(self.sap_edit.text()).name if self.sap_edit.text().strip() else "SAP pendiente"
-        self.processing_sources_label.setText(f"Acumulado: {tempo_name}    ·    Tempo SAP: {sap_name}")
-        self.result_tempo_chip.setText(f"Acumulado · {tempo_name}")
-        self.result_sap_chip.setText(f"Tempo SAP · {sap_name}")
+        tempo_name = Path(self.tempo_edit.text()).name if self.tempo_edit.text().strip() else "Partes Mensuales pendiente"
+        sap_name = Path(self.sap_edit.text()).name if self.sap_edit.text().strip() else "Tempo pendiente"
+        self.processing_sources_label.setText(f"Partes Mensuales: {tempo_name}    ·    Tempo: {sap_name}")
+        self.result_tempo_chip.setText(f"Partes Mensuales · {tempo_name}")
+        self.result_sap_chip.setText(f"Tempo · {sap_name}")
 
     def _reset_result_presentation(self) -> None:
         self._last_result = None
@@ -521,16 +522,16 @@ class ComparadorTempoPage(QWidget):
             self._shortcuts[name] = action
 
     def _choose_tempo(self) -> None:
-        chosen, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Acumulado", self.tempo_edit.text(), "Excel (*.xlsx *.xlsm)")
+        chosen, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Partes Mensuales", self.tempo_edit.text(), "Excel (*.xlsx *.xlsm)")
         if chosen:
             self.tempo_edit.setText(chosen)
 
     def _choose_sap(self) -> None:
         chosen, _ = QFileDialog.getOpenFileName(
             self,
-            "Seleccionar Excel Tempo SAP",
+            "Seleccionar Excel Tempo",
             self.sap_edit.text(),
-            "Excel Tempo SAP (*.xlsx *.xlsm *.xls *.xml)",
+            "Excel Tempo (*.xlsx *.xlsm *.xls *.xml)",
         )
         if chosen:
             self.sap_edit.setText(chosen)
@@ -548,7 +549,7 @@ class ComparadorTempoPage(QWidget):
             return
         tempo, sap = Path(self.tempo_edit.text().strip()), Path(self.sap_edit.text().strip())
         if not tempo.is_file() or not sap.is_file():
-            QMessageBox.warning(self, "Archivos pendientes", "Selecciona un Excel de Acumulado y un Excel Tempo SAP disponibles.")
+            QMessageBox.warning(self, "Archivos pendientes", "Selecciona un Excel de Partes Mensuales y un Excel Tempo disponibles.")
             return
         output = self._choose_output()
         if output is None:
@@ -559,7 +560,7 @@ class ComparadorTempoPage(QWidget):
                 return
         request = ComparatorRequest(tempo, sap, output)
         self._reset_result_presentation()
-        self._details = [f"Acumulado: {tempo}", f"Tempo SAP: {sap}", f"Salida: {output}", "-" * 48]
+        self._details = [f"Partes Mensuales: {tempo}", f"Tempo: {sap}", f"Salida: {output}", "-" * 48]
         self.progress.setRange(0, 8)
         self.progress.setValue(0)
         self._reset_processing_steps()
@@ -744,12 +745,16 @@ class ComparadorTempoPage(QWidget):
             }
             if "ABSENT" in row.red_fields:
                 red_columns.add(len(values) - 1)
+            control_column = 3 if "Control" in row.trigger_fields else None
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter if column in {0, 1} else Qt.AlignCenter)
                 if column in red_columns:
                     item.setBackground(QColor("#FDE2E1"))
                     item.setForeground(QColor("#9C0006"))
+                elif column == control_column:
+                    item.setBackground(QColor("#FFF4CC"))
+                    item.setForeground(QColor("#7A4C00"))
                 self.preview_table.setItem(row_index, column, item)
         self.preview_table.resizeColumnsToContents()
         self.preview_count.setText(f"{len(rows)} trabajador(es)")

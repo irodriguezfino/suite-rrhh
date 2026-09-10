@@ -118,18 +118,18 @@ class ComparadorTempoHelpDialog(QDialog):
         def build(layout: QVBoxLayout) -> None:
             layout.addWidget(self._title("El proceso, en tres pasos"))
             layout.addWidget(self._label(
-                "Los dos Excel de origen se leen sin modificarlos. La comparación se hace por código SAP, "
-                "manteniendo el periodo que ya esté filtrado en el Excel de Acumulado."
+                "Los dos Excel de origen se leen sin modificarlos. La comparación se hace por código Tempo, "
+                "manteniendo el periodo que ya esté filtrado en el Excel de Partes Mensuales."
             ))
             steps = QHBoxLayout()
             steps.setSpacing(12)
-            steps.addWidget(self._step_card("1", "Selecciona Acumulado", "El Excel con la tabla dinámica y el periodo que quieres revisar."))
-            steps.addWidget(self._step_card("2", "Selecciona Tempo SAP", "El Excel SAP de tiempos por trabajador, en formato .xls o .xlsx."))
+            steps.addWidget(self._step_card("1", "Selecciona Partes Mensuales", "El Excel con la tabla dinámica y el periodo que quieres revisar."))
+            steps.addWidget(self._step_card("2", "Selecciona Tempo", "El Excel Tempo de tiempos por trabajador, en formato .xls o .xlsx."))
             steps.addWidget(self._step_card("3", "Comprueba y revisa", "Se crean el informe principal y un Excel independiente de incidencias."))
             layout.addLayout(steps)
             layout.addWidget(self._callout(
                 "Los archivos originales están protegidos",
-                "La aplicación trabaja con copias temporales y nunca sobrescribe el Acumulado ni el Excel Tempo SAP.",
+                "La aplicación trabaja con copias temporales y nunca sobrescribe Partes Mensuales ni el Excel Tempo.",
                 "success",
             ))
             layout.addWidget(self._title("La idea clave"))
@@ -139,9 +139,9 @@ class ComparadorTempoHelpDialog(QDialog):
             formula_layout.setContentsMargins(18, 16, 18, 16)
             formula_layout.setSpacing(12)
             for text, style in (
-                ("Tiempo SAP", "helpFormulaSource"),
+                ("Tiempo Tempo", "helpFormulaSource"),
                 ("−", "helpFormulaOperator"),
-                ("Tiempo del Acumulado", "helpFormulaSource"),
+                ("Tiempo de Partes Mensuales", "helpFormulaSource"),
                 ("=", "helpFormulaOperator"),
                 ("Diferencia", "helpFormulaResult"),
             ):
@@ -149,7 +149,7 @@ class ComparadorTempoHelpDialog(QDialog):
             layout.addWidget(formula)
             layout.addWidget(self._callout(
                 "Cómo interpretar el signo",
-                "Ejemplo: +0:30 significa que SAP tiene 30 minutos más. −0:30 significa que el Acumulado tiene 30 minutos más.",
+                "Ejemplo: +0:30 significa que Tempo tiene 30 minutos más. −0:30 significa que Partes Mensuales tiene 30 minutos más.",
             ))
 
         return self._scroll_tab(build)
@@ -168,17 +168,17 @@ class ComparadorTempoHelpDialog(QDialog):
             for column, text in enumerate(headers):
                 grid.addWidget(self._label(text, "helpGridHeader"), 0, column)
             rows = (
-                ("Trabajador", "Nombre asociado al código SAP comparado.", "PÉREZ GARCÍA ANA"),
+                ("Trabajador", "Nombre asociado al código Tempo comparado.", "PÉREZ GARCÍA ANA"),
                 ("Incidencias", "Falta de fichaje de entrada o salida; si no existe, muestra −.", "Falta fichaje de salida"),
-                ("Trab. Día SAP", "Total SAP de Trab. Dia. No es una diferencia.", "8:00"),
-                ("Δ Trab. Día − RUIDO", "Trab. Dia SAP − RUIDO del Acumulado.", "8:00 − 7:45 = +0:15"),
-                ("Δ H. EXTRAS", "1016-HE SAP − H. EXTRAS Acumulado.", "1:30 − 1:00 = +0:30"),
-                ("Δ HFJ (15%)", "1129-HE15% SAP − HFJ Acumulado.", "0:00 − 0:20 = −0:20"),
-                ("Δ BOLSA (X%)", "1166-HE35% SAP − BOLSA Acumulado.", "2:00 − 1:45 = +0:15"),
-                ("Δ NOCTUR", "1014-HNOC SAP − NOCTUR Acumulado.", "4:00 − 3:30 = +0:30"),
-                ("Δ PENOS", "1146-PPEN SAP − PENOS Acumulado, salvo control rojo.", "0:00 − 0:30 = −0:30"),
-                ("Δ RUIDO", "1153-PRUI SAP − RUIDO Acumulado, salvo control rojo.", "0:30 − 0:45 = −0:15"),
-                ("ABSENT", "1052-HDESC SAP − ABSENT Acumulado, solo si existe absentismo.", "8:00 − 8:00 = 0:00"),
+                ("Trab. Día Tempo", "Total Tempo de Trab. Dia. No es una diferencia.", "8:00"),
+                ("Control", "Trab. Día Tempo − RUIDO PM. Se revisa si supera un minuto.", "8:00 − 7:45 = +0:15"),
+                ("Δ H. EXTRAS", "1016-HE Tempo − H. EXTRAS PM.", "1:30 − 1:00 = +0:30"),
+                ("Δ HFJ (15%)", "1129-HE15% Tempo − HFJ PM.", "0:00 − 0:20 = −0:20"),
+                ("Δ BOLSA (X%)", "1166-HE35% Tempo − BOLSA PM.", "2:00 − 1:45 = +0:15"),
+                ("Δ NOCTUR", "1014-HNOC Tempo − NOCTUR PM.", "4:00 − 3:30 = +0:30"),
+                ("Δ PENOS", "1146-PPEN Tempo − PENOS PM, salvo control rojo.", "0:00 − 0:30 = −0:30"),
+                ("Δ RUIDO", "1153-PRUI Tempo − RUIDO PM, salvo control rojo.", "0:30 − 0:45 = −0:15"),
+                ("ABSENT", "1052-HDESC Tempo − ABSENT PM, solo si existe absentismo.", "8:00 − 8:00 = 0:00"),
             )
             for row, values in enumerate(rows, start=1):
                 for column, value in enumerate(values):
@@ -189,7 +189,7 @@ class ComparadorTempoHelpDialog(QDialog):
             layout.addLayout(grid)
             layout.addWidget(self._callout(
                 "Absentismo sin datos",
-                "Cuando tanto SAP como el Acumulado tienen 0:00 de absentismo, ABSENT muestra −. Si existe en cualquiera de los dos, se muestra la diferencia, incluso cuando sea 0:00.",
+                "Cuando tanto Tempo como Partes Mensuales tienen 0:00 de absentismo, ABSENT muestra −. Si existe en cualquiera de los dos, se muestra la diferencia, incluso cuando sea 0:00.",
                 "warning",
             ))
 
@@ -200,29 +200,29 @@ class ComparadorTempoHelpDialog(QDialog):
             layout.addWidget(self._title("Reglas que cambian la lectura habitual"))
             layout.addWidget(self._callout(
                 "ML, MS, MC y MV: extras y bolsa se revisan juntas",
-                "Δ H. EXTRAS muestra −. Δ BOLSA (X%) calcula 1166-HE35% SAP − (H. EXTRAS + BOLSA del Acumulado). "
+                "Δ H. EXTRAS muestra −. Δ BOLSA (X%) calcula 1166-HE35% Tempo − (H. EXTRAS + BOLSA PM). "
                 "Ejemplo: 2:00 − (0:45 + 1:00) = +0:15.",
             ))
             layout.addWidget(self._callout(
                 "Ruido no permitido en determinadas secciones",
-                "En ADMON, CONG, CAL, COMP, EXP, RRHH, RT, SV, SVC, TIC y MTO, SAP no debería tener 1153-PRUI. "
-                "Si lo tiene, Δ RUIDO muestra directamente el valor SAP en rojo para revisarlo.",
+                "En ADMON, CONG, CAL, COMP, EXP, RRHH, RT, SV, SVC, TIC y MTO, Tempo no debería tener 1153-PRUI. "
+                "Si lo tiene, Δ RUIDO muestra directamente el valor Tempo en rojo para revisarlo.",
                 "danger",
             ))
             layout.addWidget(self._callout(
                 "Nocturnidad no permitida en ADMON y RRHH",
-                "Si SAP contiene 1014-HNOC en esas secciones, Δ NOCTUR muestra directamente ese valor en rojo.",
+                "Si Tempo contiene 1014-HNOC en esas secciones, Δ NOCTUR muestra directamente ese valor en rojo.",
                 "danger",
             ))
             layout.addWidget(self._callout(
-                "Penosidad en SAP",
-                "Si SAP contiene 1146-PPEN en cualquier sección, Δ PENOS muestra directamente ese valor en rojo. "
-                "Si SAP está a cero, la columna vuelve a mostrar la diferencia normal con el Acumulado.",
+                "Penosidad en Tempo",
+                "Si Tempo contiene 1146-PPEN en cualquier sección, Δ PENOS muestra directamente ese valor en rojo. "
+                "Si Tempo está a cero, la columna vuelve a mostrar la diferencia normal con Partes Mensuales.",
                 "danger",
             ))
             layout.addWidget(self._callout(
                 "Rojo no siempre significa una diferencia",
-                "El rojo identifica un control directo de SAP o un absentismo existente. El amarillo identifica una diferencia normal que supera el margen admitido.",
+                "El rojo identifica un control directo de Tempo o un absentismo existente. El amarillo identifica una diferencia normal o de Control que supera el margen admitido.",
                 "warning",
             ))
 
@@ -241,15 +241,16 @@ class ComparadorTempoHelpDialog(QDialog):
             checks_layout.setSpacing(9)
             for text in (
                 "✓ Una diferencia normal superior a un minuto.",
-                "✓ Un control directo SAP mostrado en rojo: ruido, nocturnidad o penosidad.",
-                "✓ Absentismo en SAP o en el Acumulado, aunque la diferencia final sea 0:00.",
+                "✓ Una diferencia de Control superior a un minuto: Trab. Día Tempo − RUIDO PM.",
+                "✓ Un control directo Tempo mostrado en rojo: ruido, nocturnidad o penosidad.",
+                "✓ Absentismo en Tempo o en Partes Mensuales, aunque la diferencia final sea 0:00.",
                 "✓ Falta de fichaje de entrada o de salida.",
             ):
                 checks_layout.addWidget(self._label(text, "helpChecklistItem"))
             layout.addWidget(checks)
             layout.addWidget(self._callout(
                 "Margen de un minuto",
-                "Una diferencia de 0:01 o menor no incluye por sí sola al trabajador. Por ejemplo, SAP 8:00 y Acumulado 7:59 no dispara una revisión.",
+                "Una diferencia de 0:01 o menor no incluye por sí sola al trabajador. Por ejemplo, Tempo 8:00 y Partes Mensuales 7:59 no dispara una revisión.",
             ))
             layout.addWidget(self._callout(
                 "Dos Excel de salida",

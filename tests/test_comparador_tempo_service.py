@@ -114,8 +114,9 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertIn("Trabajador Partes mensuales", headers)
             self.assertIn("Partes mensuales · H. EXTRAS", headers)
             self.assertIn("Valor Partes mensuales", headers)
-            self.assertIn("SAP · 1016-HE", headers)
-            self.assertNotIn("Valor Tempo", headers)
+            self.assertIn("Tempo · 1016-HE", headers)
+            self.assertIn("Valor Tempo", headers)
+            self.assertNotIn("Valor SAP", headers)
             incidents_workbook.close()
 
     def test_normal_sections_compare_extra_hours_and_hfj_with_their_sap_fields(self) -> None:
@@ -146,6 +147,36 @@ class ComparadorTempoServiceTests(unittest.TestCase):
 
             self.assertEqual(result.rows, ())
             self.assertFalse(any(item.field == "H. EXTRAS" for item in result.incidents))
+
+    def test_control_difference_includes_worker_and_is_highlighted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tempo, sap, output = root / "tempo.xlsx", root / "sap.xls", root / "resultado.xlsx"
+            tempo.touch()
+            sap.touch()
+            values = {"H. EXTRAS": 0, "HFJ (15%)": 0, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": 0, "RUIDO": 450, "ABSENT": 0}
+            sap_values = {
+                "1016-HE": 0, "1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0,
+                "1014-HNOC": 0, "1146-PPEN": 0, "1153-PRUI": 0, "1052-HDESC": 0,
+                "Trab. Dia": 480,
+            }
+
+            result = ComparadorTempoService(
+                lambda _path, _cancel, _progress: {"MTO": [{"worker": "Ana", "values": values}]},
+                lambda _path: ({"MTO": {"ANA": {"1001"}}}, []),
+                lambda _path: ({"1001": {"worker": "ANA", "values": sap_values}}, set()),
+            ).run(ComparatorRequest(tempo, sap, output))
+
+            self.assertEqual(len(result.rows), 1)
+            self.assertEqual(result.rows[0].trigger_fields, ("Control",))
+            self.assertEqual(result.rows[0].sap_daily_minus_noise_minutes, 30)
+            self.assertTrue(any(item.field == "Control" for item in result.incidents))
+            workbook = load_workbook(output)
+            sheet = workbook["Resultado"]
+            self.assertEqual(sheet.cell(5, 4).value, "Control")
+            self.assertEqual(sheet.cell(6, 4).value, "+0:30")
+            self.assertTrue(sheet.cell(6, 4).fill.fgColor.rgb.endswith("FFF4CC"))
+            workbook.close()
 
     def test_special_sap_controls_and_absence_are_included_in_red(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -192,7 +223,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertIn("PENOS", by_worker["Pepa"].red_fields)
             self.assertEqual(by_worker["Berta"].values_minutes["ABSENT"], 0)
             self.assertEqual(by_worker["Berta"].red_fields, ("ABSENT",))
-            self.assertTrue(any(item.incident_type == "Control especial SAP" for item in result.incidents))
+            self.assertTrue(any(item.incident_type == "Control especial Tempo" for item in result.incidents))
             self.assertTrue(any(item.incident_type == "Absentismo" for item in result.incidents))
 
             workbook = load_workbook(output)

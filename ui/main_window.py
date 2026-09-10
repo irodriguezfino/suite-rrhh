@@ -112,7 +112,7 @@ class MainWindow(QMainWindow):
             "Ayuda de Suite RRHH",
             "Selecciona una herramienta desde Inicio:\n"
             "• Control Tempo procesa partes Excel.\n"
-            "• Comparador de Tempo contrasta Tempo y SAP por código de trabajador.",
+            "• Comparador de Tempo contrasta Partes Mensuales y Tempo por código de trabajador.",
         )
 
     def _start_update_check(self) -> None:
