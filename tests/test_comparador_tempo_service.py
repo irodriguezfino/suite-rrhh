@@ -50,13 +50,13 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             sheet = workbook.active
             sheet.title = "Acumulados"
             sheet.append([
-                "Fecha", "Trabajador", "1016-HE", "1166-HE30%", "1166-HE35%",
+                "Fecha", "Trabajador", "1016-HE", "1129-HE15%", "1166-HE30%", "1166-HE35%",
                 "1014-HNOC", "1146-PPEN", "1153-PRUI", "1052-HDESC", "Trab. Dia", "Marcajes", "Marcajes",
             ])
             sheet.append(["", "1001 ANA PRUEBA"])
-            sheet.append(["", "2026-08-01", None, None, None, None, None, None, None, None, "[55] E 05:23", ""])
+            sheet.append(["", "2026-08-01", None, None, None, None, None, None, None, None, None, "[55] E 05:23", ""])
             sheet.append(["", "1001 ANA PRUEBA"])
-            sheet.append(["", "", 0.5, 0, 0, 0, 0, 0, 0, 3 + 70 / 1440])
+            sheet.append(["", "", 0.5, 0, 0, 0, 0, 0, 0, 0, 3 + 70 / 1440])
             workbook.save(sap_path)
             workbook.close()
 
@@ -65,6 +65,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertEqual(duplicates, set())
             self.assertEqual(totals["1001"]["worker"], "ANA PRUEBA")
             self.assertEqual(totals["1001"]["values"]["1016-HE"], 720)
+            self.assertEqual(totals["1001"]["values"]["1129-HE15%"], 0)
             self.assertEqual(totals["1001"]["values"]["Trab. Dia"], 4390)
             self.assertEqual(totals["1001"]["values"]["1153-PRUI"], 0)
             self.assertEqual(totals["1001"]["values"]["1052-HDESC"], 0)
@@ -108,15 +109,23 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertEqual(workbook["Resultado"][6][6].value, "-1:00")
             self.assertTrue(workbook["Resultado"][6][6].fill.fgColor.rgb.endswith("FFF4CC"))
             workbook.close()
+            incidents_workbook = load_workbook(result.incidents_path, data_only=True)
+            headers = [cell.value for cell in incidents_workbook["Incidencias"][1]]
+            self.assertIn("Trabajador Partes mensuales", headers)
+            self.assertIn("Partes mensuales · H. EXTRAS", headers)
+            self.assertIn("Valor Partes mensuales", headers)
+            self.assertIn("SAP · 1016-HE", headers)
+            self.assertNotIn("Valor Tempo", headers)
+            incidents_workbook.close()
 
-    def test_normal_sections_compare_extra_hours_against_1016_he(self) -> None:
-        """1129-HE15% no es la contrapartida de H. EXTRAS en secciones normales."""
+    def test_normal_sections_compare_extra_hours_and_hfj_with_their_sap_fields(self) -> None:
+        """1016-HE corresponde a extras y 1129-HE15% a HFJ (15%) en secciones normales."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             tempo, sap, output = root / "tempo.xlsx", root / "sap.xls", root / "resultado.xlsx"
             tempo.touch()
             sap.touch()
-            values = {"H. EXTRAS": 30, "HFJ (15%)": 0, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": 0, "RUIDO": 0, "ABSENT": 0}
+            values = {"H. EXTRAS": 30, "HFJ (15%)": 500, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": 0, "RUIDO": 0, "ABSENT": 0}
             sap_values = {
                 "1016-HE": 30,
                 "1129-HE15%": 500,

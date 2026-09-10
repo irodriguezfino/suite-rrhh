@@ -45,7 +45,7 @@ RESULT_COLUMNS = (
 )
 SAP_FIELD_BY_TEMPO = {
     "H. EXTRAS": "1016-HE",
-    "HFJ (15%)": "1166-HE30%",
+    "HFJ (15%)": "1129-HE15%",
     "BOLSA (X%)": "1166-HE35%",
     "NOCTUR": "1014-HNOC",
     "PENOS": "1146-PPEN",
@@ -53,7 +53,7 @@ SAP_FIELD_BY_TEMPO = {
     "ABSENT": "1052-HDESC",
 }
 SAP_COLUMNS = (
-    "1016-HE", "1166-HE30%", "1166-HE35%", "1014-HNOC", "1146-PPEN",
+    "1016-HE", "1129-HE15%", "1166-HE30%", "1166-HE35%", "1014-HNOC", "1146-PPEN",
     "1153-PRUI", "1052-HDESC", "Trab. Dia",
 )
 TOLERANCE_MINUTES = 1
@@ -916,10 +916,10 @@ class ComparadorTempoService:
         sheet.title = "Incidencias"
         sheet.sheet_view.showGridLines = False
         headers = (
-            "Tipo", "Sección", "Código SAP", "Trabajador Tempo", "Trabajador SAP",
-            *[f"Tempo · {field}" for field in TIME_COLUMNS],
+            "Tipo", "Sección", "Código SAP", "Trabajador Partes mensuales", "Trabajador SAP",
+            *[f"Partes mensuales · {field}" for field in TIME_COLUMNS],
             *[f"SAP · {field}" for field in SAP_COLUMNS],
-            "Campo", "Valor Tempo", "Valor SAP", "Diferencia (min)", "Motivo",
+            "Campo", "Valor Partes mensuales", "Valor SAP", "Diferencia (min)", "Motivo",
         )
         for column, title in enumerate(headers, start=1):
             cell = sheet.cell(1, column, title)
