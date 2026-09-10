@@ -50,7 +50,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             sheet = workbook.active
             sheet.title = "Acumulados"
             sheet.append([
-                "Fecha", "Trabajador", "1129-HE15%", "1166-HE30%", "1166-HE35%",
+                "Fecha", "Trabajador", "1016-HE", "1166-HE30%", "1166-HE35%",
                 "1014-HNOC", "1146-PPEN", "1153-PRUI", "1052-HDESC", "Trab. Dia", "Marcajes", "Marcajes",
             ])
             sheet.append(["", "1001 ANA PRUEBA"])
@@ -64,7 +64,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
 
             self.assertEqual(duplicates, set())
             self.assertEqual(totals["1001"]["worker"], "ANA PRUEBA")
-            self.assertEqual(totals["1001"]["values"]["1129-HE15%"], 720)
+            self.assertEqual(totals["1001"]["values"]["1016-HE"], 720)
             self.assertEqual(totals["1001"]["values"]["Trab. Dia"], 4390)
             self.assertEqual(totals["1001"]["values"]["1153-PRUI"], 0)
             self.assertEqual(totals["1001"]["values"]["1052-HDESC"], 0)
@@ -89,10 +89,10 @@ class ComparadorTempoServiceTests(unittest.TestCase):
 
             def sap_reader(_path):
                 return {
-                    "1001": {"worker": "ANA SAP", "values": {"1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
-                    "1002": {"worker": "BEA SAP", "values": {"1129-HE15%": 120, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
-                    "1003": {"worker": "CARLOS SAP", "values": {"1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
-                    "1004": {"worker": "SOLO SAP", "values": {"1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
+                    "1001": {"worker": "ANA SAP", "values": {"1016-HE": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
+                    "1002": {"worker": "BEA SAP", "values": {"1016-HE": 120, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
+                    "1003": {"worker": "CARLOS SAP", "values": {"1016-HE": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
+                    "1004": {"worker": "SOLO SAP", "values": {"1016-HE": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}},
                 }, set()
 
             result = ComparadorTempoService(tempo_reader, identities, sap_reader).run(ComparatorRequest(tempo, sap, output))
@@ -109,6 +109,35 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertTrue(workbook["Resultado"][6][6].fill.fgColor.rgb.endswith("FFF4CC"))
             workbook.close()
 
+    def test_normal_sections_compare_extra_hours_against_1016_he(self) -> None:
+        """1129-HE15% no es la contrapartida de H. EXTRAS en secciones normales."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tempo, sap, output = root / "tempo.xlsx", root / "sap.xls", root / "resultado.xlsx"
+            tempo.touch()
+            sap.touch()
+            values = {"H. EXTRAS": 30, "HFJ (15%)": 0, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": 0, "RUIDO": 0, "ABSENT": 0}
+            sap_values = {
+                "1016-HE": 30,
+                "1129-HE15%": 500,
+                "1166-HE30%": 0,
+                "1166-HE35%": 0,
+                "1014-HNOC": 0,
+                "1146-PPEN": 0,
+                "1153-PRUI": 0,
+                "1052-HDESC": 0,
+                "Trab. Dia": 0,
+            }
+
+            result = ComparadorTempoService(
+                lambda _path, _cancel, _progress: {"SK": [{"worker": "Carmen", "values": values}]},
+                lambda _path: ({"SK": {"CARMEN": {"106930"}}}, []),
+                lambda _path: ({"106930": {"worker": "CARMEN", "values": sap_values}}, set()),
+            ).run(ComparatorRequest(tempo, sap, output))
+
+            self.assertEqual(result.rows, ())
+            self.assertFalse(any(item.field == "H. EXTRAS" for item in result.incidents))
+
     def test_special_sap_controls_and_absence_are_included_in_red(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -120,7 +149,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
 
             def sap_values(**overrides):
                 return {
-                    "1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0,
+                    "1016-HE": 0, "1166-HE30%": 0, "1166-HE35%": 0,
                     "1014-HNOC": 0, "1146-PPEN": 0, "1153-PRUI": 0,
                     "1052-HDESC": 0, "Trab. Dia": 0, **overrides,
                 }
@@ -193,7 +222,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             result = ComparadorTempoService(
                 lambda _path, _cancel, _progress: {"TR": [{"worker": "Ana", "values": values}]},
                 lambda _path: ({"TR": {"ANA": {"1001"}}}, []),
-                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 480}, "marking_incidents": ("Falta fichaje de salida",)}}, set()),
+                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1016-HE": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 480}, "marking_incidents": ("Falta fichaje de salida",)}}, set()),
             ).run(ComparatorRequest(tempo, sap, output))
 
             self.assertEqual(len(result.rows), 1)
@@ -213,7 +242,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             result = ComparadorTempoService(
                 lambda _path, _cancel, _progress: {"TR": [{"worker": "Ana", "values": values}]},
                 lambda _path: ({"TR": {"ANA": {"1001"}}}, []),
-                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}, "marking_incidents": ("VACACIONES",)}}, set()),
+                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1016-HE": 0, "1166-HE30%": 0, "1166-HE35%": 0, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}, "marking_incidents": ("VACACIONES",)}}, set()),
             ).run(ComparatorRequest(tempo, sap, output))
 
             self.assertEqual(result.rows, ())
@@ -230,7 +259,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             service = ComparadorTempoService(
                 lambda _path, _cancel, _progress: {"ML": [{"worker": "Ana", "values": values}]},
                 lambda _path: ({"ML": {"ANA": {"1001"}}}, []),
-                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1129-HE15%": 999, "1166-HE30%": 0, "1166-HE35%": 180, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}}}, set()),
+                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1016-HE": 999, "1166-HE30%": 0, "1166-HE35%": 180, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}}}, set()),
             )
             no_difference = service.run(ComparatorRequest(tempo, sap, output))
             self.assertEqual(no_difference.rows, ())
@@ -238,7 +267,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             with_difference = ComparadorTempoService(
                 lambda _path, _cancel, _progress: {"ML": [{"worker": "Ana", "values": values}]},
                 lambda _path: ({"ML": {"ANA": {"1001"}}}, []),
-                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1129-HE15%": 0, "1166-HE30%": 0, "1166-HE35%": 240, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}}}, set()),
+                lambda _path: ({"1001": {"worker": "ANA SAP", "values": {"1016-HE": 0, "1166-HE30%": 0, "1166-HE35%": 240, "1014-HNOC": 0, "1146-PPEN": 0, "Trab. Dia": 0}}}, set()),
             ).run(ComparatorRequest(tempo, sap, root / "resultado_con_diferencia.xlsx"))
 
             self.assertEqual(len(with_difference.rows), 1)

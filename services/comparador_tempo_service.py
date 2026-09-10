@@ -44,7 +44,7 @@ RESULT_COLUMNS = (
     *[f"Δ {field}" for field in COMPARISON_COLUMNS], "ABSENT",
 )
 SAP_FIELD_BY_TEMPO = {
-    "H. EXTRAS": "1129-HE15%",
+    "H. EXTRAS": "1016-HE",
     "HFJ (15%)": "1166-HE30%",
     "BOLSA (X%)": "1166-HE35%",
     "NOCTUR": "1014-HNOC",
@@ -53,7 +53,7 @@ SAP_FIELD_BY_TEMPO = {
     "ABSENT": "1052-HDESC",
 }
 SAP_COLUMNS = (
-    "1129-HE15%", "1166-HE30%", "1166-HE35%", "1014-HNOC", "1146-PPEN",
+    "1016-HE", "1166-HE30%", "1166-HE35%", "1014-HNOC", "1146-PPEN",
     "1153-PRUI", "1052-HDESC", "Trab. Dia",
 )
 TOLERANCE_MINUTES = 1

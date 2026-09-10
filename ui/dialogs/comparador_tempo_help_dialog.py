@@ -172,7 +172,7 @@ class ComparadorTempoHelpDialog(QDialog):
                 ("Incidencias", "Falta de fichaje de entrada o salida; si no existe, muestra −.", "Falta fichaje de salida"),
                 ("Trab. Día SAP", "Total SAP de Trab. Dia. No es una diferencia.", "8:00"),
                 ("Δ Trab. Día − RUIDO", "Trab. Dia SAP − RUIDO del Acumulado.", "8:00 − 7:45 = +0:15"),
-                ("Δ H. EXTRAS", "1129-HE15% SAP − H. EXTRAS Acumulado.", "1:30 − 1:00 = +0:30"),
+                ("Δ H. EXTRAS", "1016-HE SAP − H. EXTRAS Acumulado.", "1:30 − 1:00 = +0:30"),
                 ("Δ HFJ (15%)", "1166-HE30% SAP − HFJ Acumulado.", "0:00 − 0:20 = −0:20"),
                 ("Δ BOLSA (X%)", "1166-HE35% SAP − BOLSA Acumulado.", "2:00 − 1:45 = +0:15"),
                 ("Δ NOCTUR", "1014-HNOC SAP − NOCTUR Acumulado.", "4:00 − 3:30 = +0:30"),
