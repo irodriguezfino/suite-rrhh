@@ -60,7 +60,20 @@ def matches_reason(row: ComparatorRow, reason: str | None) -> bool:
         return row.missing_source == "Partes Mensuales"
     if reason == "only_pm":
         return row.missing_source == "Tempo"
-    return reason in row.trigger_fields
+    # Direct red controls (including zero absence differences) are review reasons too.
+    return reason in row.trigger_fields or reason in row.red_fields
+
+
+def incidence_keys(row: ComparatorRow) -> set[str]:
+    return {" ".join(message.split()).casefold() for message in row.incidence_messages
+            if message.strip() not in {"", "-", "—"}}
+
+
+def matches_incidence(row: ComparatorRow, selected: str | None) -> bool:
+    if selected is None:
+        return True
+    keys = incidence_keys(row)
+    return selected in keys if selected else not keys
 
 
 def duration(minutes: int | None, signed: bool = False) -> str:

@@ -27,7 +27,7 @@ from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
 from ui.widgets.comparison_review import (
     ElidedLabel, FrozenIdentityTable, WorkerDetailPanel, calculation_text,
-    matches_reason, review_order, search_key, duration,
+    matches_reason, matches_incidence, incidence_keys, review_order, search_key, duration,
 )
 
 
@@ -472,6 +472,20 @@ class ComparadorTempoPage(QWidget):
             self.reason_filter.addItem(f"Revisar {name}", name)
         self.reason_filter.currentIndexChanged.connect(self._refresh_preview)
         filters.addWidget(self.reason_filter)
+        incidence_label = QLabel("Incidencia")
+        filters.addWidget(incidence_label)
+        self.incidence_filter = QComboBox()
+        self.incidence_filter.setAccessibleName("Filtrar por incidencia presente en el resultado")
+        self.incidence_filter.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.incidence_filter.setMinimumContentsLength(16)
+        self.incidence_filter.setMinimumWidth(180)
+        self.incidence_filter.setMaximumWidth(250)
+        self.incidence_filter.addItem("Todas las incidencias", None)
+        self.incidence_filter.setEnabled(False)
+        self.incidence_filter.currentIndexChanged.connect(self._refresh_preview)
+        self.incidence_filter.currentTextChanged.connect(self.incidence_filter.setToolTip)
+        incidence_label.setBuddy(self.incidence_filter)
+        filters.addWidget(self.incidence_filter)
         self.reset_filters_button = QPushButton("Quitar filtros")
         self.reset_filters_button.clicked.connect(self._reset_preview_filters)
         filters.addWidget(self.reset_filters_button)
@@ -556,6 +570,10 @@ class ComparadorTempoPage(QWidget):
             actions.addWidget(button)
         actions.addWidget(self.details_button)
         self.details_button.setText("Registro del proceso")
+        self.page_header.layout().removeWidget(self.new_comparison_button)
+        self.new_comparison_button.setText("Nueva comparación")
+        self.new_comparison_button.setToolTip("Volver al inicio del comparador y limpiar archivos y filtros. No elimina los informes guardados ni las carpetas recordadas.")
+        actions.addWidget(self.new_comparison_button)
         actions.addStretch(1)
         order = QLabel("Orden fijo: sección → apellidos")
         order.setObjectName("mutedLabel")
@@ -640,6 +658,11 @@ class ComparadorTempoPage(QWidget):
         self.section_filter.blockSignals(False)
         self.worker_search.clear()
         self.reason_filter.setCurrentIndex(0)
+        self.incidence_filter.blockSignals(True)
+        self.incidence_filter.clear()
+        self.incidence_filter.addItem("Todas las incidencias", None)
+        self.incidence_filter.setEnabled(False)
+        self.incidence_filter.blockSignals(False)
         self.preview_table.clearContents()
         self.preview_table.setRowCount(0)
         self.preview_count.setText("Sin resultados")
@@ -896,6 +919,22 @@ class ComparadorTempoPage(QWidget):
         self.reason_filter.blockSignals(True)
         self.reason_filter.setCurrentIndex(0)
         self.reason_filter.blockSignals(False)
+        self.incidence_filter.blockSignals(True)
+        self.incidence_filter.clear()
+        self.incidence_filter.addItem("Todas las incidencias", None)
+        options = {}
+        for row in result.rows:
+            for message in row.incidence_messages:
+                label = " ".join(message.split())
+                if label not in {"", "-", "—"}:
+                    options.setdefault(label.casefold(), label)
+        if any(not incidence_keys(row) for row in result.rows):
+            self.incidence_filter.addItem("Sin incidencias", "")
+        for key, label in sorted(options.items(), key=lambda item: search_key(item[1])):
+            self.incidence_filter.addItem(label, key)
+        self.incidence_filter.setEnabled(bool(result.rows))
+        self.incidence_filter.setToolTip("Incidencias presentes en el resultado completo; se combina con sección, motivo y búsqueda.")
+        self.incidence_filter.blockSignals(False)
         self.worker_search.blockSignals(True)
         self.worker_search.clear()
         self.worker_search.blockSignals(False)
@@ -917,6 +956,7 @@ class ComparadorTempoPage(QWidget):
                 or (bool(row.missing_source) if selection == "__missing__" else row.section == selection)]
         section_rows = rows
         rows = [row for row in rows if matches_reason(row, self.reason_filter.currentData())]
+        rows = [row for row in rows if matches_incidence(row, self.incidence_filter.currentData())]
         needle = search_key(self.worker_search.text().strip()).split()
         if needle:
             rows = [
@@ -989,7 +1029,7 @@ class ComparadorTempoPage(QWidget):
             self._close_worker_detail()
         self.empty_preview_label.setVisible(not rows)
         self.empty_preview_label.setText("Ningún trabajador coincide con estos filtros. Pulsa «Quitar filtros» para ver el resultado completo." if result.rows else "La comparación no ha incluido trabajadores para revisar. Consulta la auditoría para comprobar posibles avisos de los datos de origen.")
-        self.reset_filters_button.setEnabled(selection is not None or bool(needle) or bool(self.reason_filter.currentData()))
+        self.reset_filters_button.setEnabled(selection is not None or bool(needle) or bool(self.reason_filter.currentData()) or self.incidence_filter.currentData() is not None)
         counts = result.section_counts.get(selection)
         self.source_count.setToolTip(self.preview_count.toolTip())
         count_text = f"Vista: {len(rows)} de {len(section_rows)}"
@@ -1009,18 +1049,21 @@ class ComparadorTempoPage(QWidget):
             active.append("Sección: " + self.section_filter.currentText())
         if self.reason_filter.currentData():
             active.append(self.reason_filter.currentText())
+        if self.incidence_filter.currentData() is not None:
+            active.append("Incidencia: " + self.incidence_filter.currentText())
         if needle:
             active.append("Búsqueda: " + self.worker_search.text().strip())
         self.active_filters.setText("Filtros activos · " + " · ".join(active))
         self.active_filters.setVisible(bool(active))
 
     def _reset_preview_filters(self) -> None:
-        for control in (self.section_filter, self.reason_filter, self.worker_search):
+        for control in (self.section_filter, self.reason_filter, self.incidence_filter, self.worker_search):
             control.blockSignals(True)
         self.section_filter.setCurrentIndex(0)
         self.reason_filter.setCurrentIndex(0)
+        self.incidence_filter.setCurrentIndex(0)
         self.worker_search.clear()
-        for control in (self.section_filter, self.reason_filter, self.worker_search):
+        for control in (self.section_filter, self.reason_filter, self.incidence_filter, self.worker_search):
             control.blockSignals(False)
         self._refresh_preview()
         self.worker_search.setFocus()
@@ -1031,12 +1074,12 @@ class ComparadorTempoPage(QWidget):
 
     def _set_review_tab_order(self) -> None:
         controls = (self.result_back_button, self.paths_button, self.view_options, self.section_filter, self.worker_search,
-                    self.reason_filter, self.reset_filters_button, self.legend_help,
+                    self.reason_filter, self.incidence_filter, self.reset_filters_button, self.legend_help,
                     self.preview_table, self.detail_button, self.worker_detail.expand_button, self.worker_detail.close_button,
                     self.worker_detail.previous_button, self.worker_detail.next_button,
                     self.worker_detail.all_fields, self.worker_detail.browser,
                     self.open_result_button, self.open_incidents_button, self.open_folder_button,
-                    self.details_button)
+                    self.details_button, self.new_comparison_button)
         for first, second in zip(controls, controls[1:]):
             QWidget.setTabOrder(first, second)
 

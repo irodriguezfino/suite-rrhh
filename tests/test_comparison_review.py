@@ -14,7 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from core.models import ComparatorResult, ComparatorRow
-from services.comparador_tempo_service import SAP_FIELD_BY_TEMPO, TIME_COLUMNS
+from services.comparador_tempo_service import ComparadorTempoService, SAP_FIELD_BY_TEMPO, TIME_COLUMNS, _worker_key
 from ui.pages.comparador_tempo_page import ComparadorTempoPage
 from ui.theme import apply_application_style
 from ui.widgets.comparison_review import calculation_text, comparison_triplet, matches_reason
@@ -214,6 +214,8 @@ class ComparisonReviewTests(unittest.TestCase):
         self.assertIs(self.app.focusWidget(), self.page.worker_search)
         QTest.keyClick(self.page.worker_search, Qt.Key_Tab)
         self.assertIs(self.app.focusWidget(), self.page.reason_filter)
+        QTest.keyClick(self.page.reason_filter, Qt.Key_Tab)
+        self.assertIs(self.app.focusWidget(), self.page.incidence_filter)
         self.page.accessible_action.setChecked(False)
         self.assertTrue(table.frozen.isVisible())
 
@@ -255,6 +257,83 @@ class ComparisonReviewTests(unittest.TestCase):
         self.assertFalse(matches_reason(replace(row, incidence_messages=("Vacaciones",)), "marking"))
         self.assertTrue(matches_reason(replace(row, missing_source="Tempo"), "only_pm"))
         self.assertTrue(matches_reason(replace(row, missing_source="Partes Mensuales"), "only_tempo"))
+
+    def test_service_red_controls_reach_individual_reason_filters(self):
+        cases = (("TR", "ABSENT", 480, 0), ("TR", "ABSENT", 480, 480),
+                 ("C", "RUIDO", 0, 30), ("ADMON", "NOCTUR", 0, 30))
+        for section, field, pm_value, tempo_value in cases:
+            with self.subTest(section=section, field=field, tempo=tempo_value):
+                name = "APELLIDO NOMBRE"
+                pm = {key: 0 for key in TIME_COLUMNS}
+                pm[field] = pm_value
+                tempo = {key: 0 for key in SAP_FIELD_BY_TEMPO.values()}
+                tempo[SAP_FIELD_BY_TEMPO[field]] = tempo_value
+                tempo["Trab. Dia"] = 0
+                rows, _ = ComparadorTempoService()._compare(
+                    {section: [{"worker": name, "values": pm}]},
+                    {section: {_worker_key(name): {"100"}}}, [],
+                    {"100": {"worker": name, "values": tempo}}, set(), lambda: None)
+                self.assertEqual(len(rows), 1)
+                self.assertIn(field, rows[0].red_fields)
+                self.assertNotIn(field, rows[0].trigger_fields)
+                self.load_rows(rows + [example_row(code="200")])
+                self.page.reason_filter.setCurrentIndex(self.page.reason_filter.findData(field))
+                self.assertEqual([row.sap_code for row in self.page._preview_rows], ["100"])
+
+    def test_incidence_options_combine_without_disappearing(self):
+        rows = [replace(example_row("TR", "1"), incidence_messages=("Vacaciones", "Falta fichaje de salida")),
+                replace(example_row("ML", "2"), incidence_messages=(" vacaciones  ",)),
+                example_row("TR", "3")]
+        self.load_rows(rows)
+        combo = self.page.incidence_filter
+        self.assertEqual(combo.count(), 4)
+        combo.setCurrentIndex(combo.findData("vacaciones"))
+        self.assertEqual([row.sap_code for row in self.page._preview_rows], ["2", "1"])
+        self.page.section_filter.setCurrentText("TR")
+        self.page.reason_filter.setCurrentIndex(self.page.reason_filter.findData("H. EXTRAS"))
+        self.assertEqual([row.sap_code for row in self.page._preview_rows], ["1"])
+        self.assertEqual(combo.count(), 4)
+        combo.setCurrentIndex(combo.findData("falta fichaje de salida"))
+        self.assertEqual([row.sap_code for row in self.page._preview_rows], ["1"])
+        self.page._reset_preview_filters()
+        combo.setCurrentIndex(combo.findData(""))
+        self.assertEqual([row.sap_code for row in self.page._preview_rows], ["3"])
+        self.assertTrue(self.page.reset_filters_button.isEnabled())
+        self.assertIn("Sin incidencias", self.page.active_filters.accessibleName())
+        self.page.reset_filters_button.click()
+        self.assertEqual(len(self.page._preview_rows), 3)
+        self.load_rows([replace(example_row(), incidence_messages=("Permiso",))])
+        self.assertEqual(combo.count(), 2)
+        self.assertEqual(combo.findData("vacaciones"), -1)
+        self.assertEqual(combo.findData(""), -1)
+
+    def test_new_comparison_clears_view_not_saved_reports_or_directories(self):
+        directory = Path(self.directory.name)
+        report = directory / "saved-report.txt"
+        report.touch()
+        for kind in ("pm", "tempo", "output"):
+            self.page._remember_directory(kind, directory)
+        self.page.tempo_edit.setText(str(directory / "pm.xlsx"))
+        self.page.sap_edit.setText(str(directory / "tempo.xlsx"))
+        self.load_rows([replace(example_row(), incidence_messages=("Vacaciones",))])
+        # The synthetic result uses demo.xlsx; restore the saved output directory.
+        self.page._remember_directory("output", directory)
+        self.page.incidence_filter.setCurrentIndex(1)
+        self.page._open_worker_detail()
+        self.assertTrue(self.page.new_comparison_button.isVisible())
+        self.page.new_comparison_button.click()
+        self.app.processEvents()
+        self.assertIs(self.page.state_stack.currentWidget(), self.page.preparation_state)
+        self.assertIsNone(self.page._last_result)
+        self.assertEqual(self.page.preview_table.rowCount(), 0)
+        self.assertEqual(self.page.tempo_edit.text(), "")
+        self.assertEqual(self.page.sap_edit.text(), "")
+        self.assertEqual(self.page.incidence_filter.count(), 1)
+        self.assertFalse(self.page.incidence_filter.isEnabled())
+        self.assertTrue(report.exists())
+        for kind in ("pm", "tempo", "output"):
+            self.assertEqual(self.page._last_directory(kind), str(directory))
+        self.assertIs(self.app.focusWidget(), self.page.tempo_button)
 
     def test_frozen_columns_share_model_selection_and_scroll(self):
         self.load_rows([example_row(code=str(i), name=f"APELLIDO {i:03} NOMBRE") for i in range(100)])

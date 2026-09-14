@@ -131,7 +131,10 @@ class ComparadorTempoHelpDialog(QDialog):
                 "Revisa sin salir de la aplicación",
                 "La vista previa mantiene siempre el orden por sección y apellidos. Sección, código y trabajador permanecen fijos "
                 "al desplazarte horizontalmente; puedes ajustar sus anchos. Combina sección, búsqueda por nombre o código (Ctrl+F) "
-                "y motivo de revisión. El resumen de filtros activos explica qué estás viendo; Quitar filtros recupera todas las filas. "
+                "y motivo de revisión. Revisar ABSENT incluye también los absentismos en rojo cuya diferencia es cero. "
+                "El filtro Incidencia ofrece los tipos presentes en el resultado completo y Sin incidencias cuando corresponda; "
+                "si alguien tiene varias, podrás encontrarlo por cualquiera de ellas. Todos los filtros se combinan. "
+                "El resumen de filtros activos explica qué estás viendo; Quitar filtros recupera todas las filas. "
                 "Los recuentos de origen no cambian al buscar. Los filtros solo cambian la vista: no modifican el Excel completo ni sus cálculos.",
             ))
             layout.addWidget(self._callout(
@@ -146,7 +149,9 @@ class ComparadorTempoHelpDialog(QDialog):
             layout.addWidget(self._callout(
                 "Adapta la vista a tu forma de trabajar",
                 "El resultado dedica casi toda la pantalla a la tabla y al detalle. La barra de archivos está plegada: en Vista puedes "
-                "Mostrar archivos de origen, consultar las rutas, Cambiar archivos o comenzar una Nueva comprobación. "
+                "Mostrar archivos de origen, consultar las rutas o Cambiar archivos. "
+                "El botón Nueva comparación, al pie de la tabla, vuelve a la selección inicial y limpia archivos seleccionados, "
+                "filtros y vista previa sin cerrar la aplicación. No borra los informes guardados ni las carpetas recordadas. "
                 "En Vista también puedes activar Filas compactas para ver más trabajadores sin reducir la letra, o dejar las filas cómodas. "
                 "Restablecer anchos recupera el tamaño inicial de las columnas. Lectura accesible usa una única tabla nativa sin "
                 "columnas congeladas, para evitar duplicados al usar lectores de pantalla. La densidad y este modo se recuerdan. "
