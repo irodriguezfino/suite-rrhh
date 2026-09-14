@@ -94,16 +94,16 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(restored, result)
             page._on_success(restored)
             self.assertEqual(page.preview_table.item(0, 0).text(), "1")
-            self.assertEqual(page.preview_table.item(0, 4).text(), "-")
+            self.assertEqual(page.preview_table.item(0, 4).text(), "—")
             self.assertEqual(page.preview_table.item(0, 7).text(), "0:00")
             self.assertEqual(page.preview_table.item(0, 9).text(), "+0:25")
             self.assertEqual(page.preview_table.item(0, 9).background().color().name(), "#fff4cc")
             page.section_filter.setCurrentText("ML")
-            self.assertIn("Partes Mensuales: 3 · Tempo: 2", page.preview_count.text())
+            self.assertIn("Partes Mensuales: 3 · Tempo: 2", page.source_count.text())
             page.section_filter.setCurrentText("Solo en un origen")
             self.assertEqual(page.preview_table.rowCount(), 1)
             for column in range(3, 12):
-                self.assertEqual(page.preview_table.item(0, column).text(), "-")
+                self.assertEqual(page.preview_table.item(0, column).text(), "—")
         finally:
             window.close()
 

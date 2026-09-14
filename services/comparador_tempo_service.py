@@ -889,6 +889,7 @@ class ComparadorTempoService:
                         tuple(field for field in ("Control", *TIME_COLUMNS) if field in suppressed),
                         control_difference,
                         tuple(field for field in TIME_COLUMNS if field in red_values),
+                        pm_source_minutes=dict(values), tempo_source_minutes=dict(sap_values),
                     ))
                 if code in sap_duplicates:
                     incidents.append(self._incident("Código Tempo duplicado", section, code, worker, sap["worker"], "Código Tempo", None, None, None, "El Excel Tempo contiene más de un total para este código; se ha usado el primero.", values, sap_values))

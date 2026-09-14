@@ -65,6 +65,9 @@ class ComparatorRow:
     sap_daily_minus_noise_minutes: int | None = None
     red_fields: tuple[str, ...] = ()
     missing_source: str = ""
+    # Original totals for the read-only review panel; never infer them from deltas.
+    pm_source_minutes: dict[str, int] = field(default_factory=dict)
+    tempo_source_minutes: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

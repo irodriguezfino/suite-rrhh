@@ -30,6 +30,8 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertEqual([row.worker for row in result.rows], ["Bea"])
             self.assertEqual(result.rows[0].values_minutes["RUIDO"], 30)
             self.assertIn("RUIDO", result.rows[0].red_fields)
+            self.assertEqual(result.rows[0].pm_source_minutes["RUIDO"], 480)
+            self.assertEqual(result.rows[0].tempo_source_minutes["1153-PRUI"], 30)
 
     def test_excel_colors_follow_sign_with_red_priority_and_plain_incidents(self):
         values = {**dict.fromkeys(TIME_COLUMNS, 0), "H. EXTRAS": -30, "HFJ (15%)": 1, "PENOS": -1, "ABSENT": -15}

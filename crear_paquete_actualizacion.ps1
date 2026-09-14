@@ -11,6 +11,13 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $updates = Join-Path $projectRoot 'updates'
 $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("Suite_RRHH_Update_" + [guid]::NewGuid().ToString('N'))
 $appStaging = Join-Path $staging 'app'
+# Validate the exact temporary target before the recursive cleanup in finally.
+$resolvedStaging = [System.IO.Path]::GetFullPath($staging)
+$temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+if (-not $resolvedStaging.StartsWith($temporaryRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+    [System.IO.Path]::GetFileName($resolvedStaging) -notmatch '^Suite_RRHH_Update_[0-9a-f]{32}$') {
+    throw 'La carpeta temporal de empaquetado no pertenece al directorio temporal esperado.'
+}
 $versionLine = Select-String -LiteralPath (Join-Path $projectRoot 'core\app_info.py') -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
 if (-not $versionLine) { throw 'No se encontró APP_VERSION en core/app_info.py.' }
 $version = $versionLine.Matches[0].Groups[1].Value
@@ -53,5 +60,5 @@ try {
     Get-Item -LiteralPath $packagePath, (Join-Path $updates 'update-manifest.json') | Select-Object FullName, Length, LastWriteTime
 }
 finally {
-    Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $resolvedStaging -Recurse -Force -ErrorAction SilentlyContinue
 }

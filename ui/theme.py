@@ -165,6 +165,27 @@ def apply_application_style(app) -> None:
         QLabel#contextTitle {{ color: {COLORS['primary']}; font-weight: 700; }}
         QLabel#fileContextChip {{ color: {COLORS['text']}; background: #FFFFFF; border: 1px solid #DCE4F1; border-radius: 7px; padding: 5px 8px; }}
         QLabel#contextMetric {{ color: {COLORS['primary']}; font-weight: 700; }}
+        QLabel#activeFilters {{ color: {COLORS['primary']}; background: {COLORS['info_surface']}; border-radius: 5px; padding: 4px 8px; }}
+        QToolButton#reviewCompactHelp {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 5px; padding: 4px 8px; }}
+        QToolButton#reviewCompactHelp:hover {{ background: {COLORS['info_surface']}; }}
+        QToolButton#reviewCompactHelp:focus {{ border: 2px solid {COLORS['focus']}; }}
+        QToolButton#reviewViewOptions {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 6px; padding: 9px 25px 9px 12px; }}
+        QToolButton#reviewViewOptions:hover {{ background: {COLORS['info_surface']}; }}
+        QToolButton#reviewViewOptions:focus {{ border: 2px solid {COLORS['focus']}; }}
+        QToolButton#reviewViewOptions::menu-indicator {{ image: url("{calendar_chevron}"); width: 12px; height: 12px; subcontrol-position: right center; right: 7px; }}
+        QLabel#legendNegative, QLabel#legendPositive, QLabel#legendReview {{ border-radius: 5px; padding: 5px 8px; font-size: 10pt; }}
+        QLabel#legendNegative {{ background: #E2F0D9; color: #215E21; }}
+        QLabel#legendPositive {{ background: #FFF4CC; color: #7A4C00; }}
+        QLabel#legendReview {{ background: #FDE2E1; color: #9C0006; }}
+        QFrame#workerDetailPanel {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 8px; }}
+        QFrame#workerDetailPanel QTextBrowser {{ border: none; background: {COLORS['surface']}; padding: 0; }}
+        QTableWidget#reviewTable {{ padding: 0; border-radius: 0; gridline-color: #E4E9F1; }}
+        QTableView#frozenIdentity {{ padding: 0; border: none; border-right: 2px solid {COLORS['border']}; background: {COLORS['surface']}; alternate-background-color: #F3F6FA; gridline-color: #E4E9F1; }}
+        QSplitter::handle {{ background: {COLORS['border']}; width: 5px; }}
+        QFrame#resultPreviewCard QComboBox {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 6px; padding: 6px 28px 6px 9px; min-height: 24px; }}
+        QFrame#resultPreviewCard QComboBox:focus {{ border: 2px solid {COLORS['focus']}; }}
+        QFrame#resultPreviewCard QComboBox::drop-down {{ border: none; width: 25px; }}
+        QFrame#resultPreviewCard QComboBox::down-arrow {{ image: url("{calendar_chevron}"); width: 12px; height: 12px; }}
         QLabel#summaryLabel {{ color: {COLORS['text']}; padding: 4px 2px; }}
         QLabel#activityPending, QLabel#activityReady, QLabel#activityRunning, QLabel#activitySuccess, QLabel#activityWarning {{ border-radius: 9px; padding: 5px 9px; font-size: 9pt; font-weight: 700; }}
         QLabel#activityPending {{ color: {COLORS['muted']}; background: #EFF2F7; }}
@@ -187,4 +208,9 @@ def apply_application_style(app) -> None:
         QScrollBar::handle:horizontal:pressed {{ background: {COLORS['primary']}; }}
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal, QScrollBar::corner {{ background: transparent; }}
+        QFrame#resultPreviewCard QScrollBar:vertical {{ width: 14px; margin: 3px 2px; background: #F3F6FA; }}
+        QFrame#resultPreviewCard QScrollBar:horizontal {{ height: 14px; margin: 2px 3px; background: #F3F6FA; }}
+        QFrame#resultPreviewCard QScrollBar::handle:vertical {{ border: none; border-radius: 5px; background: #A3B2CA; min-height: 44px; }}
+        QFrame#resultPreviewCard QScrollBar::handle:horizontal {{ border: none; border-radius: 5px; background: #A3B2CA; min-width: 44px; }}
+        QFrame#resultPreviewCard QScrollBar::handle:hover {{ background: #6E86AF; }}
     """)

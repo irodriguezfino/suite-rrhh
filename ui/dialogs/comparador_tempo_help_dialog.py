@@ -128,6 +128,32 @@ class ComparadorTempoHelpDialog(QDialog):
             steps.addWidget(self._step_card("3", "Comprueba y revisa", "Se crean el informe principal y un Excel independiente de incidencias."))
             layout.addLayout(steps)
             layout.addWidget(self._callout(
+                "Revisa sin salir de la aplicación",
+                "La vista previa mantiene siempre el orden por sección y apellidos. Sección, código y trabajador permanecen fijos "
+                "al desplazarte horizontalmente; puedes ajustar sus anchos. Combina sección, búsqueda por nombre o código (Ctrl+F) "
+                "y motivo de revisión. El resumen de filtros activos explica qué estás viendo; Quitar filtros recupera todas las filas. "
+                "Los recuentos de origen no cambian al buscar. Los filtros solo cambian la vista: no modifican el Excel completo ni sus cálculos.",
+            ))
+            layout.addWidget(self._callout(
+                "Entiende el cálculo y recorre los trabajadores",
+                "Pulsa Detalle del trabajador o Intro sobre la tabla. Verás una tabla compacta con cada concepto, Tempo, PM y Resultado; los controles directos "
+                "en rojo se identifican como Valor directo. Selecciona el concepto para consultar su cálculo debajo y localizar su celda en la tabla principal. Primero aparecen los campos relevantes y el que hayas seleccionado. "
+                "Ver todos los campos muestra el resto. Anterior y Siguiente recorren la lista filtrada sin alterar su orden. "
+                "Cerrar o Esc devuelve el espacio a la tabla; el panel conserva el ancho que ajustes durante la sesión. "
+                "Si necesitas más espacio, Ampliar abre una ventana grande; Esc la cierra y vuelve a la revisión. "
+                "Si reduces la ventana, se cierra sin abrir nada inesperado; puedes abrirlo de nuevo como diálogo con el mismo botón.",
+            ))
+            layout.addWidget(self._callout(
+                "Adapta la vista a tu forma de trabajar",
+                "El resultado dedica casi toda la pantalla a la tabla y al detalle. La barra de archivos está plegada: en Vista puedes "
+                "Mostrar archivos de origen, consultar las rutas, Cambiar archivos o comenzar una Nueva comprobación. "
+                "En Vista también puedes activar Filas compactas para ver más trabajadores sin reducir la letra, o dejar las filas cómodas. "
+                "Restablecer anchos recupera el tamaño inicial de las columnas. Lectura accesible usa una única tabla nativa sin "
+                "columnas congeladas, para evitar duplicados al usar lectores de pantalla. La densidad y este modo se recuerdan. "
+                "Ver rutas permite leer y copiar las rutas completas con el teclado. Registro del proceso contiene los detalles técnicos, "
+                "no el desglose de un trabajador. El signo negativo es −, mientras — indica que no se muestra una comparación.",
+            ))
+            layout.addWidget(self._callout(
                 "Continúa desde tus carpetas habituales",
                 "La aplicación recuerda por separado las carpetas de Partes Mensuales, Tempo y resultados. "
                 "Al volver a abrirla, cada selector empieza en su última carpeta. Limpiar vacía la comparación, "

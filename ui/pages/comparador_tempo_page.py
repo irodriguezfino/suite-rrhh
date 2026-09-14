@@ -14,9 +14,9 @@ from pathlib import Path
 from PySide6.QtCore import QElapsedTimer, QProcess, QSettings, QStandardPaths, QTimer, Qt, Signal, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QBoxLayout, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+    QApplication, QBoxLayout, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QMenu, QToolButton,
     QLabel, QLineEdit, QMessageBox, QPushButton, QProgressBar,
-    QSizePolicy, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QSplitter, QStackedWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.models import ComparatorIncident, ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
@@ -25,6 +25,10 @@ from services.comparador_tempo_service import RESULT_COLUMNS, TIME_COLUMNS
 from ui.dialogs.comparador_tempo_help_dialog import ComparadorTempoHelpDialog
 from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
+from ui.widgets.comparison_review import (
+    ElidedLabel, FrozenIdentityTable, WorkerDetailPanel, calculation_text,
+    matches_reason, review_order, search_key, duration,
+)
 
 
 class ComparadorTempoPage(QWidget):
@@ -43,6 +47,16 @@ class ComparadorTempoPage(QWidget):
         self._runner_failure: tuple[str, str] | None = None
         self._runner_cancelled = False
         self._last_result: ComparatorResult | None = None
+        self._preview_rows: list[ComparatorRow] = []
+        self._detail_dialog: QDialog | None = None
+        self._dialog_detail_panel: WorkerDetailPanel | None = None
+        self._detail_width = 560
+        self._cell_cache = {}
+        self._search_cache = {}
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(140)
+        self._search_timer.timeout.connect(self._refresh_preview)
         self._details: list[str] = []
         self._timer = QElapsedTimer()
         self._elapsed_timer = QTimer(self)
@@ -54,6 +68,7 @@ class ComparadorTempoPage(QWidget):
         self._shortcuts: dict[str, QAction] = {}
         self._build_ui()
         self._install_shortcuts()
+        self._set_review_tab_order()
         self._update_state()
 
     @property
@@ -65,7 +80,9 @@ class ComparadorTempoPage(QWidget):
         outer.setContentsMargins(28, 22, 28, 18)
         outer.setSpacing(14)
 
-        header = QHBoxLayout()
+        self.page_header = QWidget()
+        header = QHBoxLayout(self.page_header)
+        header.setContentsMargins(0, 0, 0, 0)
         self.back_button = QPushButton("← Inicio")
         self.back_button.setAccessibleName("Volver a Inicio")
         self.back_button.clicked.connect(self.back_requested.emit)
@@ -87,7 +104,7 @@ class ComparadorTempoPage(QWidget):
         self.new_comparison_button.clicked.connect(self._clear)
         self.new_comparison_button.setVisible(False)
         header.addWidget(self.new_comparison_button, 0, Qt.AlignRight)
-        outer.addLayout(header)
+        outer.addWidget(self.page_header)
 
         self.state_stack = QStackedWidget()
         self.state_stack.setObjectName("comparisonStateStack")
@@ -350,21 +367,24 @@ class ComparadorTempoPage(QWidget):
         context = QHBoxLayout(self.result_context_bar)
         context.setContentsMargins(16, 10, 16, 10)
         context.setSpacing(14)
-        label = QLabel("Archivos comprobados")
+        label = QLabel("Origen")
         label.setObjectName("contextTitle")
         context.addWidget(label)
-        self.result_tempo_chip = QLabel()
+        self.result_tempo_chip = ElidedLabel()
+        self.result_tempo_chip.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.result_tempo_chip.setObjectName("fileContextChip")
         context.addWidget(self.result_tempo_chip, 1)
-        self.result_sap_chip = QLabel()
+        self.result_sap_chip = ElidedLabel()
+        self.result_sap_chip.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.result_sap_chip.setObjectName("fileContextChip")
         context.addWidget(self.result_sap_chip, 1)
+        self.paths_button = QPushButton("Ver rutas")
+        self.paths_button.clicked.connect(self._show_source_paths)
+        context.addWidget(self.paths_button)
         self.workers_value_label = QLabel("0 trabajadores")
         self.workers_value_label.setObjectName("contextMetric")
-        context.addWidget(self.workers_value_label)
         self.incidents_value_label = QLabel("0 incidencias")
         self.incidents_value_label.setObjectName("contextMetric")
-        context.addWidget(self.incidents_value_label)
         self.result_summary_label = QLabel("Aún sin resultados")
         self.result_summary_label.setObjectName("mutedLabel")
         context.addWidget(self.result_summary_label)
@@ -373,46 +393,159 @@ class ComparadorTempoPage(QWidget):
         change_button.clicked.connect(self._return_to_preparation)
         context.addWidget(change_button)
         layout.addWidget(self.result_context_bar)
+        self.result_context_bar.hide()
 
         self.preview_group = QFrame()
         self.preview_group.setObjectName("resultPreviewCard")
         preview_layout = QVBoxLayout(self.preview_group)
-        preview_layout.setContentsMargins(16, 14, 16, 12)
-        preview_layout.setSpacing(10)
+        preview_layout.setContentsMargins(10, 8, 10, 8)
+        preview_layout.setSpacing(8)
         preview_header = QHBoxLayout()
-        preview_title = QLabel("Vista previa del resultado")
+        self.result_back_button = QPushButton("← Inicio")
+        self.result_back_button.clicked.connect(self.back_requested.emit)
+        preview_header.addWidget(self.result_back_button)
+        preview_title = QLabel("Comparador de Tempo")
         preview_title.setObjectName("sectionLabel")
         preview_header.addWidget(preview_title)
-        preview_header.addSpacing(12)
-        preview_header.addWidget(QLabel("Sección"))
+        preview_header.addStretch(1)
+        preview_header.addWidget(self.workers_value_label)
+        preview_header.addWidget(self.incidents_value_label)
+        self.view_options = QToolButton()
+        self.view_options.setText("Vista")
+        self.view_options.setObjectName("reviewViewOptions")
+        self.view_options.setAccessibleName("Opciones de vista de la tabla")
+        self.view_options.setPopupMode(QToolButton.InstantPopup)
+        view_menu = QMenu(self.view_options)
+        self.compact_action = view_menu.addAction("Filas compactas")
+        self.compact_action.setCheckable(True)
+        self.compact_action.setToolTip("Desactivado: filas cómodas. Activado: más trabajadores sin reducir la letra.")
+        self.compact_action.toggled.connect(self._set_compact_view)
+        self.accessible_action = view_menu.addAction("Lectura accesible · tabla única")
+        self.accessible_action.setCheckable(True)
+        self.accessible_action.setToolTip("Para lectores de pantalla: usa una sola tabla nativa, sin columnas congeladas duplicadas.")
+        self.accessible_action.toggled.connect(self._set_accessible_view)
+        view_menu.addSeparator()
+        view_menu.addAction("Restablecer anchos", lambda: self.preview_table.reset_column_widths())
+        self.view_options.setMenu(view_menu)
+        self.sources_action = view_menu.addAction("Mostrar archivos de origen")
+        self.sources_action.setCheckable(True)
+        self.sources_action.toggled.connect(self.result_context_bar.setVisible)
+        view_menu.addAction("Consultar rutas completas", self._show_source_paths)
+        view_menu.addAction("Cambiar archivos", self._return_to_preparation)
+        view_menu.addAction("Nueva comprobación", self._clear)
+        preview_header.addWidget(self.view_options)
+        self.detail_button = QPushButton("Detalle del trabajador")
+        self.detail_button.setToolTip("Valores de origen y explicación del cálculo (Intro en la tabla)")
+        self.detail_button.setEnabled(False)
+        self.detail_button.clicked.connect(self._open_worker_detail)
+        preview_header.addWidget(self.detail_button)
+        preview_layout.addLayout(preview_header)
+
+        filters = QHBoxLayout()
+        filters.setSpacing(10)
+        section_label = QLabel("Sección")
+        filters.addWidget(section_label)
         self.section_filter = QComboBox()
         self.section_filter.setAccessibleName("Filtrar vista previa por sección")
         self.section_filter.currentTextChanged.connect(self._refresh_preview)
-        preview_header.addWidget(self.section_filter)
+        section_label.setBuddy(self.section_filter)
+        self.section_filter.setMinimumWidth(150)
+        filters.addWidget(self.section_filter)
         self.worker_search = QLineEdit()
-        self.worker_search.setPlaceholderText("Buscar trabajador o incidencia…")
-        self.worker_search.setAccessibleName("Filtrar trabajadores e incidencias")
+        self.worker_search.setPlaceholderText("Nombre, código o incidencia…")
+        self.worker_search.setAccessibleName("Buscar por nombre, código o incidencia")
         self.worker_search.setClearButtonEnabled(True)
-        self.worker_search.textChanged.connect(self._refresh_preview)
-        self.worker_search.setMinimumWidth(260)
-        preview_header.addWidget(self.worker_search)
-        preview_header.addStretch(1)
+        self.worker_search.textChanged.connect(lambda *_: self._search_timer.start())
+        self.worker_search.setMinimumWidth(180)
+        filters.addWidget(self.worker_search, 1)
+        reason_label = QLabel("Revisar")
+        filters.addWidget(reason_label)
+        self.reason_filter = QComboBox()
+        self.reason_filter.setAccessibleName("Filtrar por motivo de revisión")
+        self.reason_filter.setToolTip("Filtra por el motivo que requiere revisión según las reglas actuales. Las diferencias ordinarias deben superar un minuto; los controles rojos y fichajes siguen sus reglas especiales. No modifica el informe guardado.")
+        reason_label.setBuddy(self.reason_filter)
+        for title, value in (("Todos los motivos", ""), ("Control: requiere revisión", "Control"),
+                             ("Falta de fichaje", "marking"), ("Revisión especial · rojo", "red"),
+                             ("Solo en Tempo", "only_tempo"), ("Solo en Partes Mensuales", "only_pm")):
+            self.reason_filter.addItem(title, value)
+        for name in TIME_COLUMNS:
+            self.reason_filter.addItem(f"Revisar {name}", name)
+        self.reason_filter.currentIndexChanged.connect(self._refresh_preview)
+        filters.addWidget(self.reason_filter)
+        self.reset_filters_button = QPushButton("Quitar filtros")
+        self.reset_filters_button.clicked.connect(self._reset_preview_filters)
+        filters.addWidget(self.reset_filters_button)
+        preview_layout.addLayout(filters)
+        self.active_filters = ElidedLabel()
+        self.active_filters.setObjectName("activeFilters")
+        self.active_filters.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.active_filters.hide()
+        preview_layout.addWidget(self.active_filters)
+        self.counts_layout = QHBoxLayout()
         self.preview_count = QLabel("Sin resultados")
         self.preview_count.setObjectName("mutedLabel")
-        preview_header.addWidget(self.preview_count)
-        preview_layout.addLayout(preview_header)
-        self.preview_table = QTableWidget(0, len(RESULT_COLUMNS))
-        self.preview_table.setHorizontalHeaderLabels(RESULT_COLUMNS)
-        self.preview_table.setAlternatingRowColors(True)
-        self.preview_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.preview_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.preview_count.setWordWrap(True)
+        self.preview_count.setToolTip("Los recuentos de origen son anteriores a los filtros de esta vista. Igual cantidad no garantiza las mismas personas. Los trabajadores solo en Tempo sin sección verificable no se asignan a una sección.")
+        self.counts_layout.addWidget(self.preview_count)
+        self.source_count = QLabel()
+        self.source_count.setWordWrap(True)
+        self.source_count.setObjectName("mutedLabel")
+        self.source_count.setToolTip(self.preview_count.toolTip())
+        self.source_count.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.counts_layout.addWidget(self.source_count, 1)
+        preview_layout.addLayout(self.counts_layout)
+        legend = QHBoxLayout()
+        legend.setSpacing(12)
+        for text, name in (("− Negativo", "legendNegative"), ("+ Positivo", "legendPositive"),
+                           ("! Revisión especial", "legendReview")):
+            chip = QLabel(text)
+            chip.setObjectName(name)
+            chip.setToolTip("El color indica signo o regla especial; no significa que el dato esté aprobado.")
+            legend.addWidget(chip)
+        meaning = QLabel("— Sin comparación aplicable / ambos cero · 0:00 Valores no nulos iguales")
+        meaning.setObjectName("mutedLabel")
+        meaning.setWordWrap(True)
+        meaning.setToolTip("En absentismo, una diferencia cero también se muestra en rojo cuando hay absentismo. Consulta el detalle para ver la regla de cada campo.")
+        meaning.hide()
+        self.legend_help = QToolButton()
+        self.legend_help.setText("Leyenda y ayuda")
+        self.legend_help.setObjectName("reviewCompactHelp")
+        self.legend_help.clicked.connect(self.show_context_help)
+        legend.addWidget(self.legend_help)
+        self.counts_layout.addLayout(legend)
+        self.review_splitter = QSplitter(Qt.Horizontal)
+        self.review_splitter.setChildrenCollapsible(False)
+        self.preview_table = FrozenIdentityTable((*RESULT_COLUMNS, "Sección"))
         self.preview_table.setAccessibleName("Vista previa de trabajadores a revisar")
-        self.preview_table.horizontalHeader().setStretchLastSection(True)
+        self.preview_table.setToolTip("Orden fijo: sección y apellidos. Selecciona una fila y pulsa Intro para ver su detalle.")
         self.preview_table.setMinimumHeight(210)
         self.preview_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        preview_layout.addWidget(self.preview_table, 1)
+        self.review_splitter.addWidget(self.preview_table)
+        self.worker_detail = WorkerDetailPanel()
+        self.worker_detail.close_requested.connect(self._close_worker_detail)
+        self.worker_detail.navigate_requested.connect(self._navigate_worker)
+        self.worker_detail.expand_requested.connect(lambda: self._open_worker_detail(expanded=True))
+        self.worker_detail.field_selected.connect(self._select_review_field)
+        self.review_splitter.addWidget(self.worker_detail)
+        self.review_splitter.setStretchFactor(0, 3)
+        self.review_splitter.setStretchFactor(1, 1)
+        self.review_splitter.splitterMoved.connect(self._remember_detail_width)
+        self.worker_detail.hide()
+        self.preview_table.set_compact(False)
+        self.compact_action.setChecked(str(self._settings.value("comparador/view/compact", "false")).lower() == "true")
+        self.accessible_action.setChecked(str(self._settings.value("comparador/view/accessible", "false")).lower() == "true")
+        self.preview_table.currentCellChanged.connect(self._preview_selection_changed)
+        self.preview_table.cellDoubleClicked.connect(lambda *_: self._open_worker_detail())
+        self.preview_table.frozen.doubleClicked.connect(lambda *_: self._open_worker_detail())
+        preview_layout.addWidget(self.review_splitter, 1)
+        self.empty_preview_label = QLabel("Ningún trabajador coincide con estos filtros. Pulsa «Quitar filtros» para ver el resultado completo.")
+        self.empty_preview_label.setObjectName("statusInfo")
+        self.empty_preview_label.setWordWrap(True)
+        self.empty_preview_label.hide()
+        preview_layout.addWidget(self.empty_preview_label)
         actions = QHBoxLayout()
         self.open_result_button = QPushButton("Abrir resultado")
+        self.open_result_button.setObjectName("primaryButton")
         self.open_result_button.clicked.connect(self._open_result)
         self.open_incidents_button = QPushButton("Abrir incidencias")
         self.open_incidents_button.clicked.connect(self._open_incidents)
@@ -422,7 +555,11 @@ class ComparadorTempoPage(QWidget):
             button.setVisible(False)
             actions.addWidget(button)
         actions.addWidget(self.details_button)
+        self.details_button.setText("Registro del proceso")
         actions.addStretch(1)
+        order = QLabel("Orden fijo: sección → apellidos")
+        order.setObjectName("mutedLabel")
+        actions.addWidget(order)
         preview_layout.addLayout(actions)
         layout.addWidget(self.preview_group, 1)
         return state
@@ -437,6 +574,9 @@ class ComparadorTempoPage(QWidget):
         direction = QBoxLayout.TopToBottom if narrow else QBoxLayout.LeftToRight
         self.preparation_body.setDirection(direction)
         self.processing_steps_layout.setDirection(direction)
+        if hasattr(self, "worker_detail") and not self.worker_detail.isHidden() and self.width() < 1450:
+            self._close_worker_detail()
+            self.detail_button.setToolTip("La ventana se ha reducido. Pulsa para abrir el detalle del trabajador en un diálogo.")
 
     def _show_view(self, view: str) -> None:
         mapping = {"preparation": self.preparation_state, "processing": self.processing_state, "result": self.result_state}
@@ -445,6 +585,8 @@ class ComparadorTempoPage(QWidget):
         self.header_status_label.setText({"preparation": "PREPARACIÓN", "processing": "COMPARANDO", "result": "RESULTADO"}[view])
         self.new_comparison_button.setVisible(view == "result")
         self.subtitle_label.setVisible(view == "preparation")
+        self.page_header.setVisible(view != "result")
+        self.layout().setContentsMargins(*( (12, 10, 12, 10) if view == "result" else (28, 22, 28, 18) ))
 
     def _return_to_preparation(self) -> None:
         if not self.is_running:
@@ -486,14 +628,23 @@ class ComparadorTempoPage(QWidget):
         self.result_sap_chip.setText(f"Tempo · {sap_name}")
 
     def _reset_result_presentation(self) -> None:
+        self._search_timer.stop()
+        self._cell_cache.clear()
+        self._search_cache.clear()
+        self._close_worker_detail()
+        self._preview_rows = []
+        self.detail_button.setEnabled(False)
         self._last_result = None
         self.section_filter.blockSignals(True)
         self.section_filter.clear()
         self.section_filter.blockSignals(False)
         self.worker_search.clear()
+        self.reason_filter.setCurrentIndex(0)
         self.preview_table.clearContents()
         self.preview_table.setRowCount(0)
         self.preview_count.setText("Sin resultados")
+        self.source_count.clear()
+        self.active_filters.hide()
         self.workers_value_label.setText("0 trabajadores")
         self.incidents_value_label.setText("0 incidencias")
         self.result_summary_label.setText("Aún sin resultados")
@@ -523,6 +674,22 @@ class ComparadorTempoPage(QWidget):
             action.triggered.connect(callback)
             self.addAction(action)
             self._shortcuts[name] = action
+        search = QAction(self)
+        search.setShortcut("Ctrl+F")
+        search.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+        search.triggered.connect(lambda: self.worker_search.setFocus() if self.state_stack.currentWidget() is self.result_state else None)
+        self.addAction(search)
+        for key in ("Return", "Enter"):
+            action = QAction(self.preview_table)
+            action.setShortcut(key)
+            action.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+            action.triggered.connect(self._open_worker_detail)
+            self.preview_table.addAction(action)
+        close_detail = QAction(self.result_state)
+        close_detail.setShortcut("Esc")
+        close_detail.setShortcutContext(Qt.WidgetWithChildrenShortcut)
+        close_detail.triggered.connect(self._close_worker_detail)
+        self.result_state.addAction(close_detail)
 
     def _choose_tempo(self) -> None:
         chosen, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Partes Mensuales", self.tempo_edit.text() or self._last_directory("pm"), "Excel (*.xlsx *.xlsm)")
@@ -695,6 +862,8 @@ class ComparadorTempoPage(QWidget):
                 item.get("sap_daily_minus_noise_minutes"),
                 tuple(str(value) for value in item.get("red_fields", [])),
                 str(item.get("missing_source", "")),
+                {str(k): int(v) for k, v in item.get("pm_source_minutes", {}).items()},
+                {str(k): int(v) for k, v in item.get("tempo_source_minutes", {}).items()},
             )
             for item in data.get("rows", [])
         )
@@ -703,23 +872,33 @@ class ComparadorTempoPage(QWidget):
                                 {str(section): {"pm": int(counts["pm"]), "tempo": int(counts["tempo"])} for section, counts in data.get("section_counts", {}).items()})
 
     def _on_success(self, result: ComparatorResult) -> None:
+        self._search_timer.stop()
+        self._cell_cache.clear()
+        self._search_cache = {id(row): search_key(" ".join((row.worker, row.sap_code, *row.incidence_messages))) for row in result.rows}
+        self._close_worker_detail()
         self._last_result = result
         self._remember_directory("output", result.output_path.parent)
         self._details.extend(result.detail_lines)
         self.progress.setValue(self.progress.maximum())
         self._set_status(f"Comparación terminada: {len(result.rows)} trabajadores para revisar y {len(result.incidents)} incidencias auditables.", "statusSuccess")
-        self.workers_value_label.setText(f"{len(result.rows)} trabajadores")
-        self.incidents_value_label.setText(f"{len(result.incidents)} incidencias")
+        self.workers_value_label.setText(f"{len(result.rows)} en el informe")
+        self.incidents_value_label.setText(f"{len(result.incidents)} registros de auditoría")
         elapsed = int(result.elapsed_seconds)
         self.result_summary_label.setText(f"Completada · {elapsed // 60:02d}:{elapsed % 60:02d}")
         self.section_filter.blockSignals(True)
         self.section_filter.clear()
         self.section_filter.addItem("Todas las secciones")
-        for section in result.sections:
+        for section in sorted(set(result.sections) | set(result.section_counts), key=lambda value: (not bool(value), search_key(value))):
             self.section_filter.addItem(section or "Sin sección verificable", section)
         if any(row.missing_source for row in result.rows):
             self.section_filter.addItem("Solo en un origen", "__missing__")
         self.section_filter.blockSignals(False)
+        self.reason_filter.blockSignals(True)
+        self.reason_filter.setCurrentIndex(0)
+        self.reason_filter.blockSignals(False)
+        self.worker_search.blockSignals(True)
+        self.worker_search.clear()
+        self.worker_search.blockSignals(False)
         self._refresh_preview()
         for button in (self.open_result_button, self.open_incidents_button, self.open_folder_button):
             button.setVisible(True)
@@ -727,6 +906,7 @@ class ComparadorTempoPage(QWidget):
         self.section_filter.setFocus()
 
     def _refresh_preview(self) -> None:
+        self._search_timer.stop()
         result = self._last_result
         if result is None:
             self.preview_table.setRowCount(0)
@@ -735,33 +915,50 @@ class ComparadorTempoPage(QWidget):
         selection = self.section_filter.currentData()
         rows = [row for row in result.rows if selection is None
                 or (bool(row.missing_source) if selection == "__missing__" else row.section == selection)]
-        needle = self.worker_search.text().strip().casefold()
+        section_rows = rows
+        rows = [row for row in rows if matches_reason(row, self.reason_filter.currentData())]
+        needle = search_key(self.worker_search.text().strip()).split()
         if needle:
             rows = [
                 row for row in rows
-                if needle in row.worker.casefold()
-                or needle in " ".join(row.incidence_messages).casefold()
-                or needle in row.sap_code.casefold()
+                if all(word in self._search_cache.get(id(row), "") for word in needle)
             ]
-        self.preview_table.setRowCount(len(rows))
-        for row_index, row in enumerate(rows):
-            incidence_text = "; ".join(row.incidence_messages) if row.incidence_messages else "-"
+        rows = sorted(rows, key=review_order)
+        previous = self.preview_table.currentRow()
+        identity = None
+        if 0 <= previous < len(self._preview_rows):
+            old = self._preview_rows[previous]
+            identity = (old.section, old.sap_code, old.missing_source)
+        rows_changed = rows != self._preview_rows
+        self._preview_rows = rows
+        self.preview_table.setUpdatesEnabled(False)
+        self.preview_table.blockSignals(True)
+        if rows_changed:
+            self.preview_table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows if rows_changed else []):
+            cached = self._cell_cache.get(id(row))
+            if cached is not None:
+                for column, prototype in enumerate(cached):
+                    self.preview_table.setItem(row_index, column, QTableWidgetItem(prototype))
+                continue
+            incidence_text = "; ".join(row.incidence_messages) if row.incidence_messages else "—"
             if row.missing_source:
                 incidence_text += f" · Sección: {row.section or 'Sin asignar'}"
             values = [
                 row.sap_code,
                 row.worker,
                 incidence_text,
-                "-" if row.missing_source else self._format_minutes(row.sap_daily_work_minutes),
-                "-" if "Control" in row.suppressed_fields else self._format_difference(row.sap_daily_minus_noise_minutes or 0),
+                "—" if row.missing_source else self._format_minutes(row.sap_daily_work_minutes),
+                "—" if "Control" in row.suppressed_fields else self._format_difference(row.sap_daily_minus_noise_minutes or 0),
                 *[
-                    "-" if column in row.suppressed_fields else (
+                    "—" if column in row.suppressed_fields else (
                         self._format_minutes(row.values_minutes.get(column, 0))
                         if column in row.red_fields else self._format_difference(row.values_minutes.get(column, 0))
                     )
                     for column in TIME_COLUMNS[:-1]
                 ],
-                self._format_difference(row.values_minutes.get("ABSENT", 0)) if "ABSENT" in row.red_fields else "-",
+                self._format_difference(row.values_minutes.get("ABSENT", 0)) if "ABSENT" in row.red_fields else "—",
+                row.section or "Sin verificar",
             ]
             field_by_column = {4: "Control", **{5 + index: field for index, field in enumerate(TIME_COLUMNS)}}
             for column, value in enumerate(values):
@@ -770,31 +967,197 @@ class ComparadorTempoPage(QWidget):
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter if column in {0, 1, 2} else Qt.AlignCenter)
                 field = field_by_column.get(column)
                 if field is not None:
+                    item.setToolTip(calculation_text(row, field))
                     minutes = row.sap_daily_minus_noise_minutes if field == "Control" else row.values_minutes.get(field, 0)
-                    colors = comparison_colors(minutes, red=field in row.red_fields, suppressed=value == "-")
+                    colors = comparison_colors(minutes, red=field in row.red_fields, suppressed=value == "—")
                     if colors:
                         item.setBackground(QColor("#" + colors[0]))
                         item.setForeground(QColor("#" + colors[1]))
                 self.preview_table.setItem(row_index, column, item)
-        self.preview_table.resizeColumnsToContents()
+                item.setData(Qt.AccessibleTextRole, f"{self.preview_table.horizontalHeaderItem(column).text()}: {value}")
+                item.setData(Qt.AccessibleDescriptionRole, item.toolTip())
+            self._cell_cache[id(row)] = tuple(QTableWidgetItem(self.preview_table.item(row_index, column)) for column in range(len(values)))
+        self.preview_table.blockSignals(False)
+        self.preview_table.setUpdatesEnabled(True)
+        self.preview_table.frozen.viewport().update()
+        self.detail_button.setEnabled(bool(rows))
+        if rows:
+            selected = next((i for i, row in enumerate(rows) if (row.section, row.sap_code, row.missing_source) == identity), 0)
+            self.preview_table.setCurrentCell(selected, max(0, self.preview_table.currentColumn()))
+            self._preview_selection_changed()
+        else:
+            self._close_worker_detail()
+        self.empty_preview_label.setVisible(not rows)
+        self.empty_preview_label.setText("Ningún trabajador coincide con estos filtros. Pulsa «Quitar filtros» para ver el resultado completo." if result.rows else "La comparación no ha incluido trabajadores para revisar. Consulta la auditoría para comprobar posibles avisos de los datos de origen.")
+        self.reset_filters_button.setEnabled(selection is not None or bool(needle) or bool(self.reason_filter.currentData()))
         counts = result.section_counts.get(selection)
-        count_text = f"{len(rows)} fila(s) en vista previa"
+        self.source_count.setToolTip(self.preview_count.toolTip())
+        count_text = f"Vista: {len(rows)} de {len(section_rows)}"
+        source_text = ""
         if counts is not None:
-            count_text += f" · Partes Mensuales: {counts['pm']} · Tempo: {counts['tempo']}"
+            source_text = f"Orígenes de {selection}: Partes Mensuales: {counts['pm']} · Tempo: {counts['tempo']}"
+        elif selection is None and result.section_counts:
+            only_tempo = sum(row.missing_source == "Partes Mensuales" for row in result.rows)
+            source_text = f"Por sección: PM {sum(c['pm'] for c in result.section_counts.values())} · Tempo vinculado {sum(c['tempo'] for c in result.section_counts.values())}"
+            self.source_count.setToolTip(self.preview_count.toolTip() + f"\nTrabajadores solo en Tempo: {only_tempo}.")
+        elif selection != "__missing__":
+            source_text = "Recuentos de origen no disponibles"
         self.preview_count.setText(count_text)
+        self.source_count.setText(source_text)
+        active = []
+        if selection is not None:
+            active.append("Sección: " + self.section_filter.currentText())
+        if self.reason_filter.currentData():
+            active.append(self.reason_filter.currentText())
+        if needle:
+            active.append("Búsqueda: " + self.worker_search.text().strip())
+        self.active_filters.setText("Filtros activos · " + " · ".join(active))
+        self.active_filters.setVisible(bool(active))
+
+    def _reset_preview_filters(self) -> None:
+        for control in (self.section_filter, self.reason_filter, self.worker_search):
+            control.blockSignals(True)
+        self.section_filter.setCurrentIndex(0)
+        self.reason_filter.setCurrentIndex(0)
+        self.worker_search.clear()
+        for control in (self.section_filter, self.reason_filter, self.worker_search):
+            control.blockSignals(False)
+        self._refresh_preview()
+        self.worker_search.setFocus()
+
+    def _selected_review_row(self) -> ComparatorRow | None:
+        index = self.preview_table.currentRow()
+        return self._preview_rows[index] if 0 <= index < len(self._preview_rows) else None
+
+    def _set_review_tab_order(self) -> None:
+        controls = (self.result_back_button, self.paths_button, self.view_options, self.section_filter, self.worker_search,
+                    self.reason_filter, self.reset_filters_button, self.legend_help,
+                    self.preview_table, self.detail_button, self.worker_detail.expand_button, self.worker_detail.close_button,
+                    self.worker_detail.previous_button, self.worker_detail.next_button,
+                    self.worker_detail.all_fields, self.worker_detail.browser,
+                    self.open_result_button, self.open_incidents_button, self.open_folder_button,
+                    self.details_button)
+        for first, second in zip(controls, controls[1:]):
+            QWidget.setTabOrder(first, second)
+
+    def _set_compact_view(self, compact: bool) -> None:
+        self.preview_table.set_compact(compact)
+        self._settings.setValue("comparador/view/compact", compact)
+
+    def _set_accessible_view(self, enabled: bool) -> None:
+        self.preview_table.set_accessible_mode(enabled)
+        self._settings.setValue("comparador/view/accessible", enabled)
+
+    def _remember_detail_width(self, *args) -> None:
+        if not self.worker_detail.isHidden():
+            self._detail_width = self.review_splitter.sizes()[1]
+
+    def _navigate_worker(self, step: int) -> None:
+        index = self.preview_table.currentRow() + step
+        if 0 <= index < len(self._preview_rows):
+            self.preview_table.setCurrentCell(index, self.preview_table.currentColumn())
+
+    def _show_source_paths(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Archivos de la comprobación")
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.resize(min(850, self.width() - 40), 330)
+        layout = QVBoxLayout(dialog)
+        sources = [("Partes Mensuales", self.tempo_edit.text()), ("Tempo", self.sap_edit.text())]
+        if self._last_result is not None:
+            sources.extend((("Informe de diferencias", str(self._last_result.output_path)),
+                            ("Informe de incidencias", str(self._last_result.incidents_path))))
+        for title, path in sources:
+            layout.addWidget(QLabel(title))
+            row = QHBoxLayout()
+            edit = QLineEdit(path or "Sin archivo seleccionado")
+            edit.setReadOnly(True)
+            edit.setAccessibleName(f"Ruta completa de {title}")
+            edit.setCursorPosition(0)
+            row.addWidget(edit, 1)
+            copy = QPushButton("Copiar ruta")
+            copy.setAccessibleName(f"Copiar ruta de {title}")
+            copy.setEnabled(bool(path))
+            copy.clicked.connect(lambda checked=False, value=path: QApplication.clipboard().setText(value))
+            row.addWidget(copy)
+            layout.addLayout(row)
+        close = QPushButton("Cerrar")
+        close.clicked.connect(dialog.close)
+        layout.addWidget(close, 0, Qt.AlignRight)
+        dialog.show()
+
+
+    def _selected_review_field(self) -> str | None:
+        return {3: "Trab. Día Tempo", 4: "Control", **{5 + i: field for i, field in enumerate(TIME_COLUMNS)}}.get(self.preview_table.currentColumn())
+
+    def _select_review_field(self, field: str) -> None:
+        columns = {"Trab. Día Tempo": 3, "Control": 4, **{name: 5 + i for i, name in enumerate(TIME_COLUMNS)}}
+        if field in columns and self.preview_table.currentRow() >= 0:
+            self.preview_table.setCurrentCell(self.preview_table.currentRow(), columns[field])
+
+    def _preview_selection_changed(self, *args) -> None:
+        row = self._selected_review_row()
+        if row and not self.worker_detail.isHidden():
+            self.worker_detail.show_worker(row, self._selected_review_field())
+            self.worker_detail.set_position(self.preview_table.currentRow(), len(self._preview_rows))
+        if row and self._dialog_detail_panel is not None:
+            self._dialog_detail_panel.show_worker(row, self._selected_review_field())
+            self._dialog_detail_panel.set_position(self.preview_table.currentRow(), len(self._preview_rows))
+
+    def _open_worker_detail(self, *, expanded: bool = False) -> None:
+        row = self._selected_review_row()
+        if row is None:
+            return
+        if self.width() < 1450 or expanded:
+            if self._detail_dialog is not None:
+                self._detail_dialog.raise_()
+                return
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Detalle del trabajador · Comparador de Tempo")
+            dialog.setAttribute(Qt.WA_DeleteOnClose)
+            dialog.setWindowModality(Qt.WindowModal)
+            dialog.resize(min(1200 if expanded else 900, self.width() - 40), min(920, self.height() - 40))
+            panel = WorkerDetailPanel(dialog)
+            panel.expand_button.hide()
+            panel.show_worker(row, self._selected_review_field())
+            panel.set_position(self.preview_table.currentRow(), len(self._preview_rows))
+            panel.navigate_requested.connect(self._navigate_worker)
+            panel.field_selected.connect(self._select_review_field)
+            panel.close_requested.connect(dialog.close)
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(panel)
+            self._detail_dialog = dialog
+            self._dialog_detail_panel = panel
+            dialog.finished.connect(self._detail_dialog_finished)
+            dialog.show()
+            panel.close_button.setFocus()
+        else:
+            self.worker_detail.show_worker(row, self._selected_review_field())
+            self.worker_detail.set_position(self.preview_table.currentRow(), len(self._preview_rows))
+            self.worker_detail.show()
+            self.review_splitter.setSizes([max(600, self.review_splitter.width() - self._detail_width), self._detail_width])
+            self.worker_detail.close_button.setFocus()
+
+    def _detail_dialog_finished(self, *args) -> None:
+        self._detail_dialog = None
+        self._dialog_detail_panel = None
+        self.preview_table.setFocus()
+
+    def _close_worker_detail(self) -> None:
+        if self._detail_dialog is not None:
+            self._detail_dialog.close()
+        self.worker_detail.hide()
+        if self.state_stack.currentWidget() is self.result_state:
+            self.preview_table.setFocus()
 
     @staticmethod
     def _format_minutes(minutes: int | None) -> str:
-        minutes = minutes or 0
-        sign = "-" if minutes < 0 else ""
-        value = abs(minutes)
-        return f"{sign}{value // 60}:{value % 60:02d}"
+        return duration(minutes or 0)
 
     @staticmethod
     def _format_difference(minutes: int) -> str:
-        sign = "+" if minutes > 0 else "-" if minutes < 0 else ""
-        value = abs(minutes)
-        return f"{sign}{value // 60}:{value % 60:02d}"
+        return duration(minutes, signed=True)
 
     def _cancel(self) -> None:
         if self._cancel_file is None:
