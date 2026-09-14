@@ -40,7 +40,7 @@ TIME_COLUMNS = (
 )
 COMPARISON_COLUMNS = TIME_COLUMNS[:-1]
 RESULT_COLUMNS = (
-    "Trabajador", "Incidencias", "Trab. Día Tempo", "Control",
+    "Código SAP", "Trabajador", "Incidencias", "Trab. Día Tempo", "Control",
     *[f"Δ {field}" for field in COMPARISON_COLUMNS], "ABSENT",
 )
 SAP_FIELD_BY_TEMPO = {
@@ -59,7 +59,7 @@ SAP_COLUMNS = (
 TOLERANCE_MINUTES = 1
 MISSING_MARKING_MESSAGES = frozenset({"Falta fichaje de entrada", "Falta fichaje de salida"})
 COMBINED_EXTRA_BOLSA_SECTIONS = frozenset({"ML", "MS", "MC", "MV"})
-SPECIAL_NOISE_SECTIONS = frozenset({"ADMON", "CONG", "CAL", "COMP", "EXP", "RRHH", "RT", "SV", "SVC", "TIC", "MTO"})
+SPECIAL_NOISE_SECTIONS = frozenset({"ADMON", "C", "CAL", "COMP", "EXP", "RRHH", "RT", "SV", "SVC", "TIC", "MTO"})
 SPECIAL_NOCTURNITY_SECTIONS = frozenset({"ADMON", "RRHH"})
 OUTPUT_REPLACE_ATTEMPTS = 12
 OUTPUT_REPLACE_DELAY_SECONDS = 0.25
@@ -213,6 +213,7 @@ class ComparadorTempoService:
         self._tempo_reader = tempo_reader or self._read_tempo_by_section
         self._identity_loader = identity_loader or self._load_tempo_identities
         self._sap_reader = sap_reader or self._read_sap_totals
+        self._latest_sections_by_code: dict[str, set[str]] = {}
 
     def run(
         self,
@@ -236,6 +237,7 @@ class ComparadorTempoService:
         request = ComparatorRequest(Path(request.tempo_path), Path(request.sap_path), Path(request.output_path))
         self._validate_request(request)
         report("Leyendo la relación de trabajadores de Partes Mensuales…", 0, 8)
+        self._latest_sections_by_code = {}
         identity_map, identity_issues = self._identity_loader(request.tempo_path)
         check_cancel()
 
@@ -293,6 +295,8 @@ class ComparadorTempoService:
             )
 
     def _load_tempo_identities(self, path: Path) -> tuple[dict[str, dict[str, set[str]]], list[ComparatorIncident]]:
+        period = self._selected_pm_period(path)
+        latest: dict[str, tuple[datetime, set[str]]] = {}
         try:
             workbook = load_workbook(path, read_only=True, data_only=True)
         except PermissionError as exc:
@@ -319,9 +323,47 @@ class ComparadorTempoService:
                 code = _sap_code(row[positions["SAP"]] if positions["SAP"] < len(row) else "")
                 if section and worker and code:
                     identities[section][worker].add(code)
+                    value = row[positions["FECHA"]] if "FECHA" in positions else None
+                    if period and isinstance(value, datetime) and period[0] <= value <= period[1]:
+                        previous = latest.get(code)
+                        if previous is None or value > previous[0]:
+                            latest[code] = (value, {section})
+                        elif value == previous[0]:
+                            previous[1].add(section)
+            self._latest_sections_by_code = {code: sections for code, (_, sections) in latest.items()}
             return {section: dict(workers) for section, workers in identities.items()}, []
         finally:
             workbook.close()
+
+    @staticmethod
+    def _selected_pm_period(path: Path) -> tuple[datetime, datetime] | None:
+        """Read only the saved date timeline bound to PARALELO NUEVO.
+
+        Other sheets have independent timelines. An unavailable or unsupported
+        filter leaves section attribution unresolved rather than using history
+        outside the selected period.
+        """
+        ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        with zipfile.ZipFile(path) as archive:
+            workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+            sheet_ids = {item.get("sheetId") for item in workbook.findall("s:sheets/s:sheet", ns) if item.get("name") == TEMPO_SHEET}
+            periods = set()
+            for name in archive.namelist():
+                if not name.startswith("xl/timelineCaches/") or not name.endswith(".xml"):
+                    continue
+                root = ET.fromstring(archive.read(name))
+                if _normalise_header(root.get("sourceName")) != "FECHA":
+                    continue
+                if not any(item.get("tabId") in sheet_ids for item in root.findall("{*}pivotTables/{*}pivotTable")):
+                    continue
+                state = root.find("{*}state")
+                selection = root.find("{*}state/{*}selection")
+                if state is None or selection is None or state.get("filterType") not in {"dateEqual", "dateBetween"}:
+                    return None
+                start = datetime.fromisoformat(selection.attrib["startDate"])
+                end = datetime.fromisoformat(selection.attrib["endDate"])
+                periods.add((start, end))
+            return next(iter(periods)) if len(periods) == 1 else None
 
     def _read_tempo_by_section(self, path: Path, should_cancel: Callable[[], bool], progress: Callable[[str, int, int], None]) -> dict[str, list[dict]]:
         """Lee la tabla dinámica usando Excel COM sobre una copia temporal."""
@@ -683,12 +725,25 @@ class ComparadorTempoService:
                 worker = tempo["worker"]
                 values = dict(tempo["values"])
                 section = source_section
+                section_note = ""
                 codes = identities.get(section, {}).get(_worker_key(worker), set())
                 if not section:
                     candidates = global_identities.get(_worker_key(worker), set())
-                    if len(candidates) == 1:
-                        section, code = next(iter(candidates))
-                        codes = {code}
+                    codes = {code for _, code in candidates}
+                    if len(codes) == 1:
+                        code = next(iter(codes))
+                        historical_sections = {known_section for known_section, _ in candidates}
+                        selected_sections = self._latest_sections_by_code.get(code, set())
+                        if len(selected_sections) == 1:
+                            section = next(iter(selected_sections))
+                        elif len(historical_sections) == 1:
+                            section = next(iter(historical_sections))
+                        if len(historical_sections) > 1:
+                            section_note = (
+                                f"Cambio de sección: {', '.join(sorted(historical_sections))}. "
+                                + (f"Se agrupa en {section}, última sección verificada dentro del periodo seleccionado."
+                                   if section else "Sección pendiente de verificar; se compara una sola vez por código.")
+                            )
                 if len(codes) != 1:
                     pm_members[section].add("name:" + _worker_key(worker))
                     # An ambiguous identity is not evidence of absence in PM.
@@ -702,11 +757,16 @@ class ComparadorTempoService:
                     incidents.append(self._incident("Identidad no verificable", section, "", worker, "", "Código Tempo", None, None, None, reason, values, {}))
                     continue
                 code = next(iter(codes))
+                if section_note:
+                    incidents.append(self._incident("Cambio de sección", section, code, worker, "", "Sección", None, None, None, section_note, values, {}))
                 pm_members[section].add("code:" + code)
                 seen_tempo_codes.add(code)
                 sap = sap_workers.get(code)
                 if sap is None:
                     incidents.append(self._incident("Solo en Partes Mensuales", section, code, worker, "", "Código Tempo", None, None, None, "El código Tempo de Partes Mensuales no existe en el Excel Tempo.", values, {}))
+                    continue
+                if code in matched_codes:
+                    incidents.append(self._incident("Código repetido en Partes Mensuales", section, code, worker, sap["worker"], "Código Tempo", None, None, None, "El código ya se ha comparado; revisa las etiquetas repetidas de la tabla dinámica.", values, sap["values"]))
                     continue
                 matched_codes.add(code)
                 tempo_members[section].add(code)
@@ -794,7 +854,7 @@ class ComparadorTempoService:
                 # el resultado si no hay nada que revisar. Un fichaje faltante
                 # siempre requiere revisión y sí conserva su fila.
                 missing_marking = any(message in MISSING_MARKING_MESSAGES for message in marking_messages)
-                if red_values or mismatches or control_requires_review or missing_marking:
+                if red_values or mismatches or control_requires_review or missing_marking or (section_note and not section):
                     ordered_triggers = tuple(field for field in ("Control", *TIME_COLUMNS) if field in trigger_fields)
                     displayed_values = {
                         field: (
@@ -824,7 +884,7 @@ class ComparadorTempoService:
                         suppressed.add("Control")
                     result.append(ComparatorRow(
                         section, code, worker, displayed_values, ordered_triggers,
-                        marking_messages, sap_values.get("Trab. Dia"),
+                        marking_messages + (("Sección pendiente de verificar",) if section_note and not section else ()), sap_values.get("Trab. Dia"),
                         tuple(field for field in ("Control", *TIME_COLUMNS) if field in suppressed),
                         control_difference,
                         tuple(field for field in TIME_COLUMNS if field in red_values),
@@ -928,28 +988,30 @@ class ComparadorTempoService:
                 cell.alignment = Alignment(horizontal="center")
             row_index += 1
             for item in group_rows:
-                sheet.cell(row_index, 1, item.worker)
+                code_cell = sheet.cell(row_index, 1, item.sap_code)
+                code_cell.number_format = "@"
+                sheet.cell(row_index, 2, item.worker)
                 incidence_text = "; ".join(item.incidence_messages) if item.incidence_messages else "-"
                 if item.missing_source:
                     incidence_text += f" · Sección: {item.section or 'Sin asignar'}"
-                incidence_cell = sheet.cell(row_index, 2, incidence_text)
+                incidence_cell = sheet.cell(row_index, 3, incidence_text)
                 incidence_cell.alignment = Alignment(vertical="center", wrap_text=True)
                 if item.incidence_messages:
                     incidence_cell.fill = PatternFill("solid", fgColor="FFF4CC")
                     incidence_cell.font = Font(bold=True, color="7A4C00")
-                daily_cell = sheet.cell(row_index, 3, "-" if item.missing_source else _minutes_as_excel(item.sap_daily_work_minutes))
+                daily_cell = sheet.cell(row_index, 4, "-" if item.missing_source else _minutes_as_excel(item.sap_daily_work_minutes))
                 daily_cell.number_format = "[h]:mm"
                 daily_cell.alignment = Alignment(horizontal="center")
                 daily_difference_cell = sheet.cell(
                     row_index,
-                    4,
+                    5,
                     "-" if "Control" in item.suppressed_fields else _signed_minutes_text(item.sap_daily_minus_noise_minutes or 0),
                 )
                 daily_difference_cell.alignment = Alignment(horizontal="center")
                 if "Control" in item.trigger_fields:
                     daily_difference_cell.fill = PatternFill("solid", fgColor="FFF4CC")
                     daily_difference_cell.font = Font(bold=True, color="7A4C00")
-                for column_index, title in enumerate(COMPARISON_COLUMNS, start=5):
+                for column_index, title in enumerate(COMPARISON_COLUMNS, start=6):
                     is_red_control = title in item.red_fields
                     cell = sheet.cell(
                         row_index,
@@ -988,7 +1050,7 @@ class ComparadorTempoService:
             sheet.merge_cells(f"A4:{last_column}4")
             sheet["A4"] = "No se han encontrado trabajadores que cumplan las condiciones de comparación."
             sheet["A4"].font = Font(italic=True, color="52627A")
-        widths = (34, 34, 15, 25, 15, 15, 15, 14, 14, 14, 14)
+        widths = (13, 34, 34, 15, 25, 15, 15, 15, 14, 14, 14, 14)
         for index, width in enumerate(widths, start=1):
             sheet.column_dimensions[get_column_letter(index)].width = width
         sheet.freeze_panes = "A4"

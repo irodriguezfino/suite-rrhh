@@ -4,11 +4,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QBoxLayout, QCalendarWidget, QToolButton
-from PySide6.QtCore import QLocale, QMimeData, QPointF, QProcess, QUrl, Qt
+from PySide6.QtCore import QLocale, QMimeData, QPointF, QProcess, QSettings, QUrl, Qt
 from PySide6.QtGui import QDropEvent
 from PySide6.QtTest import QTest
 
@@ -18,6 +19,13 @@ from workers.comparador_tempo_runner import result_to_payload
 
 
 class UiSmokeTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.settings_path = str(Path(directory.name) / "preferences.ini")
+        settings_patch = patch("ui.pages.comparador_tempo_page.QSettings", side_effect=lambda *args: QSettings(self.settings_path, QSettings.IniFormat))
+        settings_patch.start()
+        self.addCleanup(settings_patch.stop)
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
@@ -29,6 +37,30 @@ class UiSmokeTests(unittest.TestCase):
         self.assertFalse(window.fase1_page.generate_button.isEnabled())
         self.assertFalse(window.comparador_page.compare_button.isEnabled())
         window.close()
+
+    def test_comparator_remembers_three_folders_after_reopening_and_clear(self):
+        from ui.pages.comparador_tempo_page import ComparadorTempoPage
+        page = ComparadorTempoPage()
+        with patch("ui.pages.comparador_tempo_page.QFileDialog.getOpenFileName", return_value=("C:/PM/partes.xlsx", "")):
+            page._choose_tempo()
+        with patch("ui.pages.comparador_tempo_page.QFileDialog.getOpenFileName", return_value=("C:/Tempo/export.xlsx", "")):
+            page._choose_sap()
+        with patch("ui.pages.comparador_tempo_page.QFileDialog.getSaveFileName", return_value=("C:/Informes/resultado.xlsx", "")):
+            page._choose_output()
+        page._clear()
+        page.close()
+        reopened = ComparadorTempoPage()
+        try:
+            with patch("ui.pages.comparador_tempo_page.QFileDialog.getOpenFileName", return_value=("", "")) as dialog:
+                reopened._choose_tempo()
+                self.assertEqual(Path(dialog.call_args.args[2]), Path("C:/PM"))
+                reopened._choose_sap()
+                self.assertEqual(Path(dialog.call_args.args[2]), Path("C:/Tempo"))
+            with patch("ui.pages.comparador_tempo_page.QFileDialog.getSaveFileName", return_value=("", "")) as dialog:
+                reopened._choose_output()
+                self.assertEqual(Path(dialog.call_args.args[2]).parent, Path("C:/Informes"))
+        finally:
+            reopened.close()
 
     def test_comparator_result_transport_preview_dashes_and_missing_filter(self):
         window = MainWindow()
@@ -45,15 +77,16 @@ class UiSmokeTests(unittest.TestCase):
             restored = page._result_from_payload(result_to_payload(result))
             self.assertEqual(restored, result)
             page._on_success(restored)
-            self.assertEqual(page.preview_table.item(0, 3).text(), "-")
-            self.assertEqual(page.preview_table.item(0, 6).text(), "0:00")
-            self.assertEqual(page.preview_table.item(0, 8).text(), "+0:25")
-            self.assertEqual(page.preview_table.item(0, 8).background().color().name(), "#fff4cc")
+            self.assertEqual(page.preview_table.item(0, 0).text(), "1")
+            self.assertEqual(page.preview_table.item(0, 4).text(), "-")
+            self.assertEqual(page.preview_table.item(0, 7).text(), "0:00")
+            self.assertEqual(page.preview_table.item(0, 9).text(), "+0:25")
+            self.assertEqual(page.preview_table.item(0, 9).background().color().name(), "#fff4cc")
             page.section_filter.setCurrentText("ML")
             self.assertIn("Partes Mensuales: 3 · Tempo: 2", page.preview_count.text())
             page.section_filter.setCurrentText("Solo en un origen")
             self.assertEqual(page.preview_table.rowCount(), 1)
-            for column in range(2, 11):
+            for column in range(3, 12):
                 self.assertEqual(page.preview_table.item(0, column).text(), "-")
         finally:
             window.close()

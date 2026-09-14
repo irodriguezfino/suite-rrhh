@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QProcess, QTimer, Qt, Signal, QUrl
+from PySide6.QtCore import QElapsedTimer, QProcess, QSettings, QStandardPaths, QTimer, Qt, Signal, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QBoxLayout, QComboBox, QFileDialog, QFrame, QHBoxLayout,
@@ -29,8 +29,9 @@ from ui.dialogs.error_dialog import ErrorDialog
 class ComparadorTempoPage(QWidget):
     back_requested = Signal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, *, settings=None) -> None:
         super().__init__(parent)
+        self._settings = settings if settings is not None else QSettings("Grupo Vall", "Suite RRHH")
         self.setObjectName("pageSurface")
         self._process: QProcess | None = None
         self._run_directory: Path | None = None
@@ -523,26 +524,37 @@ class ComparadorTempoPage(QWidget):
             self._shortcuts[name] = action
 
     def _choose_tempo(self) -> None:
-        chosen, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Partes Mensuales", self.tempo_edit.text(), "Excel (*.xlsx *.xlsm)")
+        chosen, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Partes Mensuales", self.tempo_edit.text() or self._last_directory("pm"), "Excel (*.xlsx *.xlsm)")
         if chosen:
+            self._remember_directory("pm", Path(chosen).parent)
             self.tempo_edit.setText(chosen)
 
     def _choose_sap(self) -> None:
         chosen, _ = QFileDialog.getOpenFileName(
             self,
             "Seleccionar Excel Tempo",
-            self.sap_edit.text(),
+            self.sap_edit.text() or self._last_directory("tempo"),
             "Excel Tempo (*.xlsx *.xlsm *.xls *.xml)",
         )
         if chosen:
+            self._remember_directory("tempo", Path(chosen).parent)
             self.sap_edit.setText(chosen)
 
+    def _last_directory(self, kind: str) -> str:
+        default = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) or str(Path.home())
+        return str(self._settings.value(f"comparador/paths/{kind}", default))
+
+    def _remember_directory(self, kind: str, directory: Path) -> None:
+        self._settings.setValue(f"comparador/paths/{kind}", str(directory))
+        self._settings.sync()
+
     def _choose_output(self) -> Path | None:
-        default = Path.home() / "Documents" / f"Comparador_Tempo_{datetime.now():%Y%m%d}.xlsx"
+        default = Path(self._last_directory("output")) / f"Comparador_Tempo_{datetime.now():%Y%m%d}.xlsx"
         chosen, _ = QFileDialog.getSaveFileName(self, "Guardar resultado de comparación", str(default), "Excel (*.xlsx)")
         if not chosen:
             return None
         path = Path(chosen)
+        self._remember_directory("output", path.parent)
         return path if path.suffix.lower() == ".xlsx" else path.with_suffix(".xlsx")
 
     def _start(self) -> None:
@@ -691,6 +703,7 @@ class ComparadorTempoPage(QWidget):
 
     def _on_success(self, result: ComparatorResult) -> None:
         self._last_result = result
+        self._remember_directory("output", result.output_path.parent)
         self._details.extend(result.detail_lines)
         self.progress.setValue(self.progress.maximum())
         self._set_status(f"Comparación terminada: {len(result.rows)} trabajadores para revisar y {len(result.incidents)} incidencias auditables.", "statusSuccess")
@@ -735,6 +748,7 @@ class ComparadorTempoPage(QWidget):
             if row.missing_source:
                 incidence_text += f" · Sección: {row.section or 'Sin asignar'}"
             values = [
+                row.sap_code,
                 row.worker,
                 incidence_text,
                 "-" if row.missing_source else self._format_minutes(row.sap_daily_work_minutes),
@@ -749,23 +763,23 @@ class ComparadorTempoPage(QWidget):
                 self._format_difference(row.values_minutes.get("ABSENT", 0)) if "ABSENT" in row.red_fields else "-",
             ]
             red_columns = {
-                4 + index
+                5 + index
                 for index, column in enumerate(TIME_COLUMNS[:-1])
                 if column in row.red_fields
             }
             if "ABSENT" in row.red_fields:
                 red_columns.add(len(values) - 1)
-            difference_columns = {4 + index for index, field in enumerate(TIME_COLUMNS[:-1]) if field in row.trigger_fields}
+            difference_columns = {5 + index for index, field in enumerate(TIME_COLUMNS[:-1]) if field in row.trigger_fields}
             if "Control" in row.trigger_fields:
-                difference_columns.add(3)
+                difference_columns.add(4)
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(f"Sección: {row.section or 'Sin asignar'} · Código Tempo: {row.sap_code}\n{value}")
-                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter if column in {0, 1} else Qt.AlignCenter)
+                item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter if column in {0, 1, 2} else Qt.AlignCenter)
                 if column in red_columns:
                     item.setBackground(QColor("#FDE2E1"))
                     item.setForeground(QColor("#9C0006"))
-                elif column in difference_columns or (column == 1 and row.missing_source):
+                elif column in difference_columns or (column == 2 and row.missing_source):
                     item.setBackground(QColor("#FFF4CC"))
                     item.setForeground(QColor("#7A4C00"))
                 self.preview_table.setItem(row_index, column, item)

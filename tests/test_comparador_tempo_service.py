@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,6 +21,65 @@ from services.comparador_tempo_service import (
 
 
 class ComparadorTempoServiceTests(unittest.TestCase):
+    def test_worker_moving_sections_uses_latest_section_in_selected_period(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pm, tempo = root / "pm.xlsx", root / "tempo.xlsx"
+            tempo.touch()
+            book = Workbook()
+            data = book.active
+            data.title = "DATOS"
+            data.append(["FECHA", "SECCION", "SAP", "TRABAJADOR"])
+            for date, section in ((datetime(2026, 8, 30), "C"), (datetime(2026, 9, 10), "X"), (datetime(2026, 9, 20), "C")):
+                data.append([date, section, 80700, "ORTEGA ARENAS AARON MICHAEL"])
+            book.create_sheet("PARALELO NUEVO")
+            book.save(pm)
+            book.close()
+            timeline = '<timelineCacheDefinition sourceName="FECHA"><pivotTables><pivotTable tabId="2"/></pivotTables><state filterType="dateEqual"><selection startDate="2026-09-10T00:00:00" endDate="2026-09-10T00:00:00"/></state></timelineCacheDefinition>'
+            with zipfile.ZipFile(pm, "a") as archive:
+                archive.writestr("xl/timelineCaches/timeline1.xml", timeline)
+                archive.writestr("xl/timelineCaches/timeline2.xml", timeline.replace('tabId="2"', 'tabId="9"').replace("2026-09-10", "2026-09-20"))
+            values = {**dict.fromkeys(TIME_COLUMNS, 0), "NOCTUR": 240, "RUIDO": 7200}
+            service = ComparadorTempoService(
+                tempo_reader=lambda *_: {"": [{"worker": "ORTEGA ARENAS AARON MICHAEL", "values": values}]},
+                sap_reader=lambda _: ({"80700": {"worker": "ORTEGA ARENAS AARON", "values": {**dict.fromkeys(SAP_COLUMNS, 0), "1014-HNOC": 220, "Trab. Dia": 7200}}}, set()),
+            )
+            result = service.run(ComparatorRequest(pm, tempo, root / "result.xlsx"))
+            self.assertEqual(len(result.rows), 1)
+            self.assertEqual(result.rows[0].sap_code, "80700")
+            self.assertEqual(result.rows[0].section, "X")
+            self.assertEqual(result.rows[0].values_minutes["NOCTUR"], -20)
+            self.assertFalse(result.rows[0].missing_source)
+            self.assertEqual(result.section_counts, {"X": {"pm": 1, "tempo": 1}})
+            self.assertTrue(any(i.incident_type == "Cambio de sección" for i in result.incidents))
+            self.assertFalse(any(i.incident_type in {"Identidad no verificable", "Solo en Tempo"} for i in result.incidents))
+
+    def test_unique_code_with_unresolved_section_is_not_missing(self):
+        service = ComparadorTempoService()
+        zero = dict.fromkeys(TIME_COLUMNS, 0)
+        for latest in ({}, {"80700": {"C", "X"}}):
+            service._latest_sections_by_code = latest
+            rows, incidents = service._compare(
+                {"": [{"worker": "ANA", "values": zero}]},
+                {"C": {"ANA": {"80700"}}, "X": {"ANA": {"80700"}}}, [],
+                {"80700": {"worker": "ANA", "values": dict.fromkeys(SAP_COLUMNS, 0)}}, set(), lambda: None,
+            )
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].sap_code, "80700")
+            self.assertFalse(rows[0].missing_source)
+            self.assertIn("Sección pendiente de verificar", rows[0].incidence_messages)
+            self.assertFalse(any(i.incident_type == "Solo en Tempo" for i in incidents))
+
+    def test_congelado_c_uses_noise_exception(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._comparison_fixture(Path(directory), {
+                "1": ("C", "Ana", {"RUIDO": 480}, {"Trab. Dia": 480}),
+                "2": ("C", "Bea", {"RUIDO": 480}, {"Trab. Dia": 480, "1153-PRUI": 30}),
+            })
+            self.assertEqual([row.worker for row in result.rows], ["Bea"])
+            self.assertEqual(result.rows[0].values_minutes["RUIDO"], 30)
+            self.assertIn("RUIDO", result.rows[0].red_fields)
+
     def _comparison_fixture(self, root, people, tempo_only=None):
         """People: section, name, PM values, Tempo values (None = absent)."""
         pm, tempo = root / "pm.xlsx", root / "tempo.xlsx"
@@ -45,7 +106,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             })
             workbook = load_workbook(result.output_path)
             try:
-                data = {row[0].value: [cell.value for cell in row] for row in workbook.active}
+                data = {row[1].value or row[0].value: [cell.value for cell in row[1:]] for row in workbook.active}
                 # Columns: name, incidents, daily, Control, extras, HFJ, bolsa, noctur, penos, ruido, absent.
                 self.assertEqual(data["Ana"][3:], ["0:00", "0:00", "-", "-0:30", "-", "+0:25", "0:00", "-"])
                 self.assertEqual(data["Bea"][3:], ["-", "-", "-", "0:00", "-", "-", "-", "0:00"])
@@ -64,7 +125,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertFalse(any(i.tempo_worker == "Ana" and i.field == "NOCTUR" for i in result.incidents))
             workbook = load_workbook(result.output_path)
             try:
-                data = {row[0].value: row for row in workbook.active}
+                data = {row[1].value: row[1:] for row in workbook.active}
                 self.assertEqual(data["Bea"][7].value, "-")
                 self.assertEqual(data["Bea"][9].value, "-")
                 self.assertEqual(data["Clara"][7].value, "0:15")
@@ -86,14 +147,14 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertTrue(all(row.missing_source for row in result.rows[1:]))
             workbook = load_workbook(result.output_path)
             try:
-                data = {row[0].value: [cell.value for cell in row] for row in workbook.active}
+                data = {row[1].value or row[0].value: [cell.value for cell in row[1:]] for row in workbook.active}
                 self.assertIn("SECCIÓN · ML · Partes Mensuales: 2 · Tempo: 1", data)
                 self.assertIn("No aparece en Tempo", data["Bea"][1])
                 self.assertIn("Sección: ML", data["Bea"][1])
                 self.assertIn("No aparece en Partes Mensuales", data["Dora"][1])
                 for worker in ("Bea", "Dora"):
                     self.assertEqual(data[worker][2:], ["-"] * 9)
-                first_column = [row[0].value for row in workbook.active]
+                first_column = [row[1].value or row[0].value for row in workbook.active]
                 self.assertGreater(first_column.index("Bea"), first_column.index("Clara"))
             finally:
                 workbook.close()
@@ -200,8 +261,10 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertTrue(result.incidents_path.exists())
             workbook = load_workbook(output, data_only=True)
             self.assertEqual(workbook["Resultado"][1][0].value, "Comparador de Tempo · Resultado")
-            self.assertEqual(workbook["Resultado"][6][6].value, "-1:00")
-            self.assertTrue(workbook["Resultado"][6][6].fill.fgColor.rgb.endswith("FFF4CC"))
+            self.assertEqual(workbook["Resultado"][6][7].value, "-1:00")
+            self.assertTrue(workbook["Resultado"][6][7].fill.fgColor.rgb.endswith("FFF4CC"))
+            self.assertEqual(workbook["Resultado"][5][0].value, "Código SAP")
+            self.assertEqual(workbook["Resultado"][6][0].value, "1001")
             workbook.close()
             incidents_workbook = load_workbook(result.incidents_path, data_only=True)
             headers = [cell.value for cell in incidents_workbook["Incidencias"][1]]
@@ -267,9 +330,9 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             self.assertTrue(any(item.field == "Control" for item in result.incidents))
             workbook = load_workbook(output)
             sheet = workbook["Resultado"]
-            self.assertEqual(sheet.cell(5, 4).value, "Control")
-            self.assertEqual(sheet.cell(6, 4).value, "+0:30")
-            self.assertTrue(sheet.cell(6, 4).fill.fgColor.rgb.endswith("FFF4CC"))
+            self.assertEqual(sheet.cell(5, 5).value, "Control")
+            self.assertEqual(sheet.cell(6, 5).value, "+0:30")
+            self.assertTrue(sheet.cell(6, 5).fill.fgColor.rgb.endswith("FFF4CC"))
             workbook.close()
 
     def test_special_tempo_controls_and_absence_are_included_in_red(self) -> None:
@@ -325,9 +388,9 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             workbook = load_workbook(output)
             sheet = workbook["Resultado"]
             worker_rows = {
-                str(sheet.cell(row_number, 1).value): row_number
+                str(sheet.cell(row_number, 2).value): row_number
                 for row_number in range(1, sheet.max_row + 1)
-                if sheet.cell(row_number, 1).value in {"Marta", "Pepa", "Berta"}
+                if sheet.cell(row_number, 2).value in {"Marta", "Pepa", "Berta"}
             }
             marta_header = worker_rows["Marta"] - 1
             pepa_header = worker_rows["Pepa"] - 1

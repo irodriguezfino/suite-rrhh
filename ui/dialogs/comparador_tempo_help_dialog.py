@@ -128,6 +128,12 @@ class ComparadorTempoHelpDialog(QDialog):
             steps.addWidget(self._step_card("3", "Comprueba y revisa", "Se crean el informe principal y un Excel independiente de incidencias."))
             layout.addLayout(steps)
             layout.addWidget(self._callout(
+                "Continúa desde tus carpetas habituales",
+                "La aplicación recuerda por separado las carpetas de Partes Mensuales, Tempo y resultados. "
+                "Al volver a abrirla, cada selector empieza en su última carpeta. Limpiar vacía la comparación, "
+                "pero conserva estas ubicaciones. Selecciona los archivos del periodo que quieras comprobar.",
+            ))
+            layout.addWidget(self._callout(
                 "Los archivos originales están protegidos",
                 "La aplicación trabaja con copias temporales y nunca sobrescribe Partes Mensuales ni el Excel Tempo.",
                 "success",
@@ -168,6 +174,7 @@ class ComparadorTempoHelpDialog(QDialog):
             for column, text in enumerate(headers):
                 grid.addWidget(self._label(text, "helpGridHeader"), 0, column)
             rows = (
+                ("Código SAP", "Identificador del trabajador en Tempo, también en el listado final de ausentes.", "80700"),
                 ("Trabajador", "Nombre asociado al código Tempo comparado.", "PÉREZ GARCÍA ANA"),
                 ("Incidencias", "Marcajes, ausencias u origen donde falta el trabajador. Sin incidencias: −.", "No aparece en Tempo"),
                 ("Trab. Día Tempo", "Total Tempo de Trab. Dia. No es una diferencia.", "8:00"),
@@ -216,7 +223,7 @@ class ComparadorTempoHelpDialog(QDialog):
             ))
             layout.addWidget(self._callout(
                 "Ruido no permitido en determinadas secciones",
-                "En ADMON, CONG, CAL, COMP, EXP, RRHH, RT, SV, SVC, TIC y MTO, Tempo no debería tener 1153-PRUI. "
+                "En ADMON, C (Congelado), CAL, COMP, EXP, RRHH, RT, SV, SVC, TIC y MTO, Tempo no debería tener 1153-PRUI. "
                 "Si Tempo tiene 0:00, Δ RUIDO muestra −, aunque PM tenga tiempo. Si Tempo tiene un valor distinto de cero, "
                 "se muestra ese valor directamente en rojo. Control sigue comparando Trab. Día Tempo − RUIDO PM.",
                 "danger",
@@ -278,6 +285,15 @@ class ComparadorTempoHelpDialog(QDialog):
                 "Si solo está en PM, Incidencias indica «No aparece en Tempo» y su sección. Si solo está en Tempo, "
                 "indica «No aparece en Partes Mensuales» y «Sección: Sin asignar». Todos sus tiempos y diferencias son −: "
                 "no se calcula contra un trabajador ausente. Puedes verlos juntos con el filtro «Solo en un origen».",
+                "warning",
+            ))
+            layout.addWidget(self._callout(
+                "Un trabajador puede cambiar de sección",
+                "Un mismo código en varias secciones sigue siendo un único trabajador. Se compara una sola vez y se "
+                "agrupa en la última sección registrada dentro del periodo seleccionado en PM. Por ejemplo: 80700, antes en C "
+                "y el 10/09 en X, se agrupa en X al revisar el 10/09. El Excel de incidencias documenta el cambio. Si el filtro "
+                "de fecha o la última sección no permiten resolverlo con seguridad, se muestra «Sección pendiente de verificar» "
+                "y se comparan sus tiempos por código. No se marca como ausente por cambiar de sección.",
                 "warning",
             ))
             layout.addWidget(self._callout(
