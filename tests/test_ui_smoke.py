@@ -14,6 +14,7 @@ from PySide6.QtTest import QTest
 
 from core.models import ComparatorResult, ComparatorRow, ProgressUpdate
 from ui.main_window import MainWindow
+from workers.comparador_tempo_runner import result_to_payload
 
 
 class UiSmokeTests(unittest.TestCase):
@@ -28,6 +29,34 @@ class UiSmokeTests(unittest.TestCase):
         self.assertFalse(window.fase1_page.generate_button.isEnabled())
         self.assertFalse(window.comparador_page.compare_button.isEnabled())
         window.close()
+
+    def test_comparator_result_transport_preview_dashes_and_missing_filter(self):
+        window = MainWindow()
+        page = window.comparador_page
+        result = ComparatorResult(
+            Path("result.xlsx"), Path("incidents.xlsx"), (
+                ComparatorRow("ML", "1", "Ana", {"H. EXTRAS": 0, "HFJ (15%)": 0, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": 25, "RUIDO": 0, "ABSENT": 0},
+                              trigger_fields=("PENOS",), suppressed_fields=("H. EXTRAS", "HFJ (15%)", "Control", "NOCTUR", "RUIDO")),
+                ComparatorRow("ML", "2", "Bea", {}, incidence_messages=("No aparece en Tempo",),
+                              suppressed_fields=("Control", "H. EXTRAS", "HFJ (15%)", "BOLSA (X%)", "NOCTUR", "PENOS", "RUIDO", "ABSENT"), missing_source="Tempo"),
+            ), (), ("ML",), 1.0, (), {"ML": {"pm": 3, "tempo": 2}},
+        )
+        try:
+            restored = page._result_from_payload(result_to_payload(result))
+            self.assertEqual(restored, result)
+            page._on_success(restored)
+            self.assertEqual(page.preview_table.item(0, 3).text(), "-")
+            self.assertEqual(page.preview_table.item(0, 6).text(), "0:00")
+            self.assertEqual(page.preview_table.item(0, 8).text(), "+0:25")
+            self.assertEqual(page.preview_table.item(0, 8).background().color().name(), "#fff4cc")
+            page.section_filter.setCurrentText("ML")
+            self.assertIn("Partes Mensuales: 3 · Tempo: 2", page.preview_count.text())
+            page.section_filter.setCurrentText("Solo en un origen")
+            self.assertEqual(page.preview_table.rowCount(), 1)
+            for column in range(2, 11):
+                self.assertEqual(page.preview_table.item(0, column).text(), "-")
+        finally:
+            window.close()
 
     def test_control_tempo_wide_and_compact_layouts(self) -> None:
         window = MainWindow()

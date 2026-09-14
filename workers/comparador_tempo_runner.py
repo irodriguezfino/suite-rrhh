@@ -54,6 +54,7 @@ def _row_payload(row: ComparatorRow) -> dict[str, Any]:
         "suppressed_fields": list(row.suppressed_fields),
         "sap_daily_minus_noise_minutes": row.sap_daily_minus_noise_minutes,
         "red_fields": list(row.red_fields),
+        "missing_source": row.missing_source,
     }
 
 
@@ -74,6 +75,7 @@ def result_to_payload(result: ComparatorResult) -> dict[str, Any]:
         "incidents": [_incident_payload(item) for item in result.incidents],
         "sections": list(result.sections), "elapsed_seconds": result.elapsed_seconds,
         "detail_lines": list(result.detail_lines),
+        "section_counts": result.section_counts,
     }
 
 

@@ -249,11 +249,12 @@ class ComparadorTempoService:
         sap_workers, sap_duplicates = self._sap_reader(request.sap_path)
         check_cancel()
         report("Comparando códigos y Partes Mensuales…", 5, 8)
-        rows, incidents = self._compare(tempo_sections, identity_map, identity_issues, sap_workers, sap_duplicates, check_cancel)
+        section_counts: dict[str, dict[str, int]] = {}
+        rows, incidents = self._compare(tempo_sections, identity_map, identity_issues, sap_workers, sap_duplicates, check_cancel, section_counts)
         check_cancel()
         report("Generando Excel de resultado e incidencias…", 6, 8, rows=len(rows), event="writing")
         requested_incidents_path = request.output_path.with_name(f"{request.output_path.stem}_incidencias.xlsx")
-        output_path, incidents_path = self._write_outputs(request.output_path, requested_incidents_path, rows, incidents)
+        output_path, incidents_path = self._write_outputs(request.output_path, requested_incidents_path, rows, incidents, section_counts)
         elapsed = time.perf_counter() - started
         detail = (
             f"Secciones analizadas: {len(tempo_sections)}",
@@ -271,9 +272,10 @@ class ComparadorTempoService:
             incidents_path,
             tuple(rows),
             tuple(incidents),
-            tuple(sorted({row.section for row in rows})),
+            tuple(sorted(section_counts)),
             elapsed,
             detail,
+            section_counts,
         )
 
     @staticmethod
@@ -663,11 +665,14 @@ class ComparadorTempoService:
         sap_workers: dict[str, dict],
         sap_duplicates: set[str],
         check_cancel: Callable[[], None],
+        section_counts: dict[str, dict[str, int]] | None = None,
     ) -> tuple[list[ComparatorRow], list[ComparatorIncident]]:
         result: list[ComparatorRow] = []
         incidents = list(identity_issues)
         matched_codes: set[str] = set()
         seen_tempo_codes: set[str] = set()
+        pm_members: dict[str, set[str]] = defaultdict(set)
+        tempo_members: dict[str, set[str]] = defaultdict(set)
         global_identities: dict[str, set[tuple[str, str]]] = defaultdict(set)
         for known_section, workers in identities.items():
             for worker_key, codes in workers.items():
@@ -685,6 +690,9 @@ class ComparadorTempoService:
                         section, code = next(iter(candidates))
                         codes = {code}
                 if len(codes) != 1:
+                    pm_members[section].add("name:" + _worker_key(worker))
+                    # An ambiguous identity is not evidence of absence in PM.
+                    seen_tempo_codes.update(codes)
                     reason = "No se encontró un código Tempo único para el trabajador en DATOS de Partes Mensuales."
                     if source_section:
                         if len(codes) > 1:
@@ -694,12 +702,14 @@ class ComparadorTempoService:
                     incidents.append(self._incident("Identidad no verificable", section, "", worker, "", "Código Tempo", None, None, None, reason, values, {}))
                     continue
                 code = next(iter(codes))
+                pm_members[section].add("code:" + code)
                 seen_tempo_codes.add(code)
                 sap = sap_workers.get(code)
                 if sap is None:
                     incidents.append(self._incident("Solo en Partes Mensuales", section, code, worker, "", "Código Tempo", None, None, None, "El código Tempo de Partes Mensuales no existe en el Excel Tempo.", values, {}))
                     continue
                 matched_codes.add(code)
+                tempo_members[section].add(code)
                 sap_values = dict(sap["values"])
                 marking_messages = tuple(str(message) for message in sap.get("marking_incidents", ()))
                 normalized_section = _normalise_text(section).upper()
@@ -719,6 +729,8 @@ class ComparadorTempoService:
                         # En estas secciones RUIDO SAP debe ser cero. No se
                         # compara contra Tempo: un valor SAP distinto de cero
                         # se presenta como control directo en rojo.
+                        continue
+                    if has_special_nocturnity_rule and tempo_field == "NOCTUR":
                         continue
                     compared_tempo_minutes = values[tempo_field]
                     comparison_name = tempo_field
@@ -795,10 +807,25 @@ class ComparadorTempoService:
                         for field in TIME_COLUMNS
                     }
                     displayed_values.update(red_values)
+                    suppressed = set()
+                    for field, sap_field in SAP_FIELD_BY_TEMPO.items():
+                        pm_value = values[field]
+                        if has_combined_extra_bolsa and field == "BOLSA (X%)":
+                            pm_value = values["H. EXTRAS"] + values["BOLSA (X%)"]
+                        if pm_value == 0 and sap_values.get(sap_field, 0) == 0:
+                            suppressed.add(field)
+                    if has_combined_extra_bolsa:
+                        suppressed.add("H. EXTRAS")
+                    if has_special_noise_rule and sap_values.get("1153-PRUI", 0) == 0:
+                        suppressed.add("RUIDO")
+                    if has_special_nocturnity_rule and sap_values.get("1014-HNOC", 0) == 0:
+                        suppressed.add("NOCTUR")
+                    if sap_values.get("Trab. Dia", 0) == 0 and values["RUIDO"] == 0:
+                        suppressed.add("Control")
                     result.append(ComparatorRow(
                         section, code, worker, displayed_values, ordered_triggers,
                         marking_messages, sap_values.get("Trab. Dia"),
-                        ("H. EXTRAS",) if has_combined_extra_bolsa else (),
+                        tuple(field for field in ("Control", *TIME_COLUMNS) if field in suppressed),
                         control_difference,
                         tuple(field for field in TIME_COLUMNS if field in red_values),
                     ))
@@ -810,6 +837,26 @@ class ComparadorTempoService:
             if code in sap_duplicates and code not in matched_codes:
                 incidents.append(self._incident("Código Tempo duplicado", "", code, "", sap["worker"], "Código Tempo", None, None, None, "El Excel Tempo contiene más de un total para este código; se ha usado el primero.", {}, sap["values"]))
         result.sort(key=lambda item: (item.section, _worker_key(item.worker), item.sap_code))
+        # Keep unmatched workers at the end, once per source/section/code.
+        missing = {}
+        for incident in incidents:
+            if incident.incident_type not in {"Solo en Tempo", "Solo en Partes Mensuales"}:
+                continue
+            source = "Partes Mensuales" if incident.incident_type == "Solo en Tempo" else "Tempo"
+            missing[(source, incident.section, incident.sap_code)] = ComparatorRow(
+                section=incident.section, sap_code=incident.sap_code,
+                worker=incident.tempo_worker or incident.sap_worker,
+                values_minutes={field: 0 for field in TIME_COLUMNS},
+                incidence_messages=(f"No aparece en {source}",),
+                suppressed_fields=("Trab. Día Tempo", "Control", *TIME_COLUMNS),
+                missing_source=source,
+            )
+        result.extend(sorted(missing.values(), key=lambda item: (item.section, _worker_key(item.worker), item.sap_code)))
+        if section_counts is not None:
+            section_counts.update({
+                section: {"pm": len(members), "tempo": len(tempo_members[section])}
+                for section, members in sorted(pm_members.items())
+            })
         return result, incidents
 
     @staticmethod
@@ -820,16 +867,16 @@ class ComparadorTempoService:
     ) -> ComparatorIncident:
         return ComparatorIncident(incident_type, section, code, tempo_worker, sap_worker, field, tempo_minutes, sap_minutes, difference, reason, dict(tempo_values), dict(sap_values))
 
-    def _write_outputs(self, output_path: Path, incidents_path: Path, rows: list[ComparatorRow], incidents: list[ComparatorIncident]) -> tuple[Path, Path]:
+    def _write_outputs(self, output_path: Path, incidents_path: Path, rows: list[ComparatorRow], incidents: list[ComparatorIncident], section_counts: dict[str, dict[str, int]] | None = None) -> tuple[Path, Path]:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with OutputLock(output_path), OutputLock(incidents_path):
-            saved_output_path = self._save_main_workbook(output_path, rows)
+            saved_output_path = self._save_main_workbook(output_path, rows, section_counts)
             if saved_output_path != output_path:
                 incidents_path = saved_output_path.with_name(f"{saved_output_path.stem}_incidencias.xlsx")
             saved_incidents_path = self._save_incidents_workbook(incidents_path, incidents)
         return saved_output_path, saved_incidents_path
 
-    def _save_main_workbook(self, path: Path, rows: list[ComparatorRow]) -> Path:
+    def _save_main_workbook(self, path: Path, rows: list[ComparatorRow], section_counts: dict[str, dict[str, int]] | None = None) -> Path:
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "Resultado"
@@ -843,10 +890,34 @@ class ComparadorTempoService:
         sheet.merge_cells(f"A2:{last_column}2")
         sheet["A2"] = "Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM. En rojo se muestran los controles directos Tempo y el diferencial de absentismo; en amarillo, las diferencias superiores a un minuto."
         sheet["A2"].font = Font(italic=True, color="52627A")
+        sheet["A2"].alignment = Alignment(wrap_text=True, vertical="center")
+        sheet.row_dimensions[2].height = 32
+        sheet.merge_cells(f"A3:{last_column}3")
+        sheet["A3"] = "−: ambos tiempos a cero o regla especial. 0:00: tiempos iguales con datos. Recuentos de origen antes de filtrar diferencias; personas sin correspondencia al final."
+        sheet["A3"].font = Font(italic=True, color="52627A")
+        sheet["A3"].alignment = Alignment(wrap_text=True, vertical="center")
+        sheet.row_dimensions[3].height = 28
+        section_counts = section_counts or {}
+        grouped: dict[str, list[ComparatorRow]] = defaultdict(list)
+        missing_rows = []
+        for item in rows:
+            if item.missing_source:
+                missing_rows.append(item)
+            else:
+                grouped[item.section].append(item)
+        groups = []
+        for section in sorted(set(grouped) | set(section_counts)):
+            title = f"SECCIÓN · {section or 'Sin sección verificable'}"
+            counts = section_counts.get(section)
+            if counts is not None:
+                title += f" · Partes Mensuales: {counts['pm']} · Tempo: {counts['tempo']}"
+            groups.append((title, grouped[section]))
+        if missing_rows:
+            groups.append(("TRABAJADORES NO ENCONTRADOS EN AMBOS ORÍGENES", missing_rows))
         row_index = 4
-        for section in sorted({row.section for row in rows}):
+        for heading, group_rows in groups:
             sheet.merge_cells(start_row=row_index, start_column=1, end_row=row_index, end_column=len(RESULT_COLUMNS))
-            cell = sheet.cell(row_index, 1, f"SECCIÓN · {section}")
+            cell = sheet.cell(row_index, 1, heading)
             cell.fill = PatternFill("solid", fgColor="DCE8FF")
             cell.font = Font(bold=True, color="123283")
             row_index += 1
@@ -856,20 +927,23 @@ class ComparadorTempoService:
                 cell.font = Font(bold=True, color="FFFFFF")
                 cell.alignment = Alignment(horizontal="center")
             row_index += 1
-            for item in (row for row in rows if row.section == section):
+            for item in group_rows:
                 sheet.cell(row_index, 1, item.worker)
-                incidence_cell = sheet.cell(row_index, 2, "; ".join(item.incidence_messages) if item.incidence_messages else "-")
+                incidence_text = "; ".join(item.incidence_messages) if item.incidence_messages else "-"
+                if item.missing_source:
+                    incidence_text += f" · Sección: {item.section or 'Sin asignar'}"
+                incidence_cell = sheet.cell(row_index, 2, incidence_text)
                 incidence_cell.alignment = Alignment(vertical="center", wrap_text=True)
                 if item.incidence_messages:
                     incidence_cell.fill = PatternFill("solid", fgColor="FFF4CC")
                     incidence_cell.font = Font(bold=True, color="7A4C00")
-                daily_cell = sheet.cell(row_index, 3, _minutes_as_excel(item.sap_daily_work_minutes))
+                daily_cell = sheet.cell(row_index, 3, "-" if item.missing_source else _minutes_as_excel(item.sap_daily_work_minutes))
                 daily_cell.number_format = "[h]:mm"
                 daily_cell.alignment = Alignment(horizontal="center")
                 daily_difference_cell = sheet.cell(
                     row_index,
                     4,
-                    _signed_minutes_text(item.sap_daily_minus_noise_minutes or 0),
+                    "-" if "Control" in item.suppressed_fields else _signed_minutes_text(item.sap_daily_minus_noise_minutes or 0),
                 )
                 daily_difference_cell.alignment = Alignment(horizontal="center")
                 if "Control" in item.trigger_fields:
@@ -902,9 +976,15 @@ class ComparadorTempoService:
                 if has_absence_control:
                     absent_cell.fill = PatternFill("solid", fgColor="FDE2E1")
                     absent_cell.font = Font(bold=True, color="9C0006")
+                if item.missing_source:
+                    sheet.row_dimensions[row_index].height = 42
+                row_index += 1
+            if not group_rows:
+                sheet.merge_cells(start_row=row_index, start_column=1, end_row=row_index, end_column=len(RESULT_COLUMNS))
+                sheet.cell(row_index, 1, "Sin diferencias que mostrar. Los trabajadores sin correspondencia se detallan al final.")
                 row_index += 1
             row_index += 1
-        if not rows:
+        if not groups:
             sheet.merge_cells(f"A4:{last_column}4")
             sheet["A4"] = "No se han encontrado trabajadores que cumplan las condiciones de comparación."
             sheet["A4"].font = Font(italic=True, color="52627A")

@@ -64,6 +64,7 @@ class ComparatorRow:
     suppressed_fields: tuple[str, ...] = ()
     sap_daily_minus_noise_minutes: int | None = None
     red_fields: tuple[str, ...] = ()
+    missing_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -91,3 +92,4 @@ class ComparatorResult:
     sections: tuple[str, ...]
     elapsed_seconds: float
     detail_lines: tuple[str, ...]
+    section_counts: dict[str, dict[str, int]] = field(default_factory=dict)

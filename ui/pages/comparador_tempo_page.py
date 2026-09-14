@@ -152,10 +152,11 @@ class ComparadorTempoPage(QWidget):
         summary_title.setObjectName("summaryCardTitle")
         summary_layout.addWidget(summary_title)
         summary_text = QLabel(
-            "• Se muestran solo los trabajadores que requieren revisión.\n"
-            "• Cada columna Δ calcula: tiempo Tempo − tiempo de Partes Mensuales.\n"
-            "• Control calcula Trab. Día Tempo − RUIDO PM y se resalta en amarillo cuando supera un minuto.\n"
-            "• ABSENT muestra Tempo 1052-HDESC − PM cuando existe absentismo; los controles directos Tempo se resaltan en rojo."
+            "• Diferencias por sección y, al final, trabajadores que faltan en un origen.\n"
+            "• Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM.\n"
+            "• Ambos a cero: −. Tiempos iguales con datos: 0:00.\n"
+            "• Amarillo: diferencia superior a un minuto. Rojo: control especial o absentismo.\n"
+            "• Cada sección indica cuántos trabajadores se encuentran en cada origen."
         )
         summary_text.setObjectName("summaryCardText")
         summary_text.setWordWrap(True)
@@ -680,11 +681,13 @@ class ComparadorTempoPage(QWidget):
                 tuple(str(value) for value in item.get("suppressed_fields", [])),
                 item.get("sap_daily_minus_noise_minutes"),
                 tuple(str(value) for value in item.get("red_fields", [])),
+                str(item.get("missing_source", "")),
             )
             for item in data.get("rows", [])
         )
         incidents = tuple(ComparatorIncident(str(item["incident_type"]), str(item["section"]), str(item["sap_code"]), str(item["tempo_worker"]), str(item["sap_worker"]), str(item["field"]), item.get("tempo_minutes"), item.get("sap_minutes"), item.get("difference_minutes"), str(item["reason"]), {str(k): int(v) for k, v in item.get("tempo_values_minutes", {}).items()}, {str(k): int(v) for k, v in item.get("sap_values_minutes", {}).items()}) for item in data.get("incidents", []))
-        return ComparatorResult(Path(data["output_path"]), Path(data["incidents_path"]), rows, incidents, tuple(str(value) for value in data.get("sections", [])), float(data.get("elapsed_seconds", 0)), tuple(str(value) for value in data.get("detail_lines", [])))
+        return ComparatorResult(Path(data["output_path"]), Path(data["incidents_path"]), rows, incidents, tuple(str(value) for value in data.get("sections", [])), float(data.get("elapsed_seconds", 0)), tuple(str(value) for value in data.get("detail_lines", [])),
+                                {str(section): {"pm": int(counts["pm"]), "tempo": int(counts["tempo"])} for section, counts in data.get("section_counts", {}).items()})
 
     def _on_success(self, result: ComparatorResult) -> None:
         self._last_result = result
@@ -698,7 +701,10 @@ class ComparadorTempoPage(QWidget):
         self.section_filter.blockSignals(True)
         self.section_filter.clear()
         self.section_filter.addItem("Todas las secciones")
-        self.section_filter.addItems(list(result.sections))
+        for section in result.sections:
+            self.section_filter.addItem(section or "Sin sección verificable", section)
+        if any(row.missing_source for row in result.rows):
+            self.section_filter.addItem("Solo en un origen", "__missing__")
         self.section_filter.blockSignals(False)
         self._refresh_preview()
         for button in (self.open_result_button, self.open_incidents_button, self.open_folder_button):
@@ -712,8 +718,9 @@ class ComparadorTempoPage(QWidget):
             self.preview_table.setRowCount(0)
             self.preview_count.setText("Sin resultados")
             return
-        selection = self.section_filter.currentText()
-        rows = [row for row in result.rows if selection == "Todas las secciones" or row.section == selection]
+        selection = self.section_filter.currentData()
+        rows = [row for row in result.rows if selection is None
+                or (bool(row.missing_source) if selection == "__missing__" else row.section == selection)]
         needle = self.worker_search.text().strip().casefold()
         if needle:
             rows = [
@@ -724,11 +731,14 @@ class ComparadorTempoPage(QWidget):
             ]
         self.preview_table.setRowCount(len(rows))
         for row_index, row in enumerate(rows):
+            incidence_text = "; ".join(row.incidence_messages) if row.incidence_messages else "-"
+            if row.missing_source:
+                incidence_text += f" · Sección: {row.section or 'Sin asignar'}"
             values = [
                 row.worker,
-                "; ".join(row.incidence_messages) if row.incidence_messages else "-",
-                self._format_minutes(row.sap_daily_work_minutes),
-                self._format_difference(row.sap_daily_minus_noise_minutes or 0),
+                incidence_text,
+                "-" if row.missing_source else self._format_minutes(row.sap_daily_work_minutes),
+                "-" if "Control" in row.suppressed_fields else self._format_difference(row.sap_daily_minus_noise_minutes or 0),
                 *[
                     "-" if column in row.suppressed_fields else (
                         self._format_minutes(row.values_minutes.get(column, 0))
@@ -745,19 +755,26 @@ class ComparadorTempoPage(QWidget):
             }
             if "ABSENT" in row.red_fields:
                 red_columns.add(len(values) - 1)
-            control_column = 3 if "Control" in row.trigger_fields else None
+            difference_columns = {4 + index for index, field in enumerate(TIME_COLUMNS[:-1]) if field in row.trigger_fields}
+            if "Control" in row.trigger_fields:
+                difference_columns.add(3)
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
+                item.setToolTip(f"Sección: {row.section or 'Sin asignar'} · Código Tempo: {row.sap_code}\n{value}")
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter if column in {0, 1} else Qt.AlignCenter)
                 if column in red_columns:
                     item.setBackground(QColor("#FDE2E1"))
                     item.setForeground(QColor("#9C0006"))
-                elif column == control_column:
+                elif column in difference_columns or (column == 1 and row.missing_source):
                     item.setBackground(QColor("#FFF4CC"))
                     item.setForeground(QColor("#7A4C00"))
                 self.preview_table.setItem(row_index, column, item)
         self.preview_table.resizeColumnsToContents()
-        self.preview_count.setText(f"{len(rows)} trabajador(es)")
+        counts = result.section_counts.get(selection)
+        count_text = f"{len(rows)} fila(s) en vista previa"
+        if counts is not None:
+            count_text += f" · Partes Mensuales: {counts['pm']} · Tempo: {counts['tempo']}"
+        self.preview_count.setText(count_text)
 
     @staticmethod
     def _format_minutes(minutes: int | None) -> str:

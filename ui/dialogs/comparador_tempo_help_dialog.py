@@ -169,13 +169,13 @@ class ComparadorTempoHelpDialog(QDialog):
                 grid.addWidget(self._label(text, "helpGridHeader"), 0, column)
             rows = (
                 ("Trabajador", "Nombre asociado al código Tempo comparado.", "PÉREZ GARCÍA ANA"),
-                ("Incidencias", "Falta de fichaje de entrada o salida; si no existe, muestra −.", "Falta fichaje de salida"),
+                ("Incidencias", "Marcajes, ausencias u origen donde falta el trabajador. Sin incidencias: −.", "No aparece en Tempo"),
                 ("Trab. Día Tempo", "Total Tempo de Trab. Dia. No es una diferencia.", "8:00"),
                 ("Control", "Trab. Día Tempo − RUIDO PM. Se revisa si supera un minuto.", "8:00 − 7:45 = +0:15"),
                 ("Δ H. EXTRAS", "1016-HE Tempo − H. EXTRAS PM.", "1:30 − 1:00 = +0:30"),
                 ("Δ HFJ (15%)", "1129-HE15% Tempo − HFJ PM.", "0:00 − 0:20 = −0:20"),
                 ("Δ BOLSA (X%)", "1166-HE35% Tempo − BOLSA PM.", "2:00 − 1:45 = +0:15"),
-                ("Δ NOCTUR", "1014-HNOC Tempo − NOCTUR PM.", "4:00 − 3:30 = +0:30"),
+                ("Δ NOCTUR", "1014-HNOC Tempo − NOCTUR PM, salvo ADMON y RRHH.", "4:00 − 3:30 = +0:30"),
                 ("Δ PENOS", "1146-PPEN Tempo − PENOS PM.", "0:00 − 0:30 = −0:30"),
                 ("Δ RUIDO", "1153-PRUI Tempo − RUIDO PM, salvo control rojo.", "0:30 − 0:45 = −0:15"),
                 ("ABSENT", "1052-HDESC Tempo − ABSENT PM, solo si existe absentismo.", "8:00 − 8:00 = 0:00"),
@@ -187,6 +187,17 @@ class ComparadorTempoHelpDialog(QDialog):
             grid.setColumnStretch(1, 5)
             grid.setColumnStretch(2, 3)
             layout.addLayout(grid)
+            layout.addWidget(self._title("Un guion y un cero significan cosas distintas"))
+            examples = QHBoxLayout()
+            examples.setSpacing(12)
+            examples.addWidget(self._step_card("1", "Ambos tiempos a cero", "Tempo 0:00 − PM 0:00 → −. No hay tiempo en ninguno de los dos orígenes."), 1)
+            examples.addWidget(self._step_card("2", "Tiempos iguales con datos", "Tempo 8:00 − PM 8:00 → 0:00. Hay tiempo y coincide; se conserva si la fila aparece por otro motivo."), 1)
+            examples.addWidget(self._step_card("3", "Solo uno tiene tiempo", "Tempo 0:00 − PM 0:30 → −0:30. Se muestra la diferencia con su signo."), 1)
+            layout.addLayout(examples)
+            layout.addWidget(self._label(
+                "Esta regla se aplica a todas las diferencias, incluido Control y ABSENT. Trab. Día Tempo es un total, "
+                "por lo que puede mostrar 0:00. En el listado final de trabajadores sin correspondencia, todos los tiempos son guiones."
+            ))
             layout.addWidget(self._callout(
                 "Absentismo sin datos",
                 "Cuando tanto Tempo como Partes Mensuales tienen 0:00 de absentismo, ABSENT muestra −. Si existe en cualquiera de los dos, se muestra la diferencia, incluso cuando sea 0:00.",
@@ -206,12 +217,14 @@ class ComparadorTempoHelpDialog(QDialog):
             layout.addWidget(self._callout(
                 "Ruido no permitido en determinadas secciones",
                 "En ADMON, CONG, CAL, COMP, EXP, RRHH, RT, SV, SVC, TIC y MTO, Tempo no debería tener 1153-PRUI. "
-                "Si lo tiene, Δ RUIDO muestra directamente el valor Tempo en rojo para revisarlo.",
+                "Si Tempo tiene 0:00, Δ RUIDO muestra −, aunque PM tenga tiempo. Si Tempo tiene un valor distinto de cero, "
+                "se muestra ese valor directamente en rojo. Control sigue comparando Trab. Día Tempo − RUIDO PM.",
                 "danger",
             ))
             layout.addWidget(self._callout(
                 "Nocturnidad no permitida en ADMON y RRHH",
-                "Si Tempo contiene 1014-HNOC en esas secciones, Δ NOCTUR muestra directamente ese valor en rojo.",
+                "Si 1014-HNOC de Tempo es 0:00, Δ NOCTUR muestra −, aunque PM tenga nocturnidad. Ese tiempo de PM "
+                "no incluye por sí solo al trabajador. Si Tempo contiene nocturnidad, se muestra su valor directamente en rojo.",
                 "danger",
             ))
             layout.addWidget(self._callout(
@@ -245,6 +258,7 @@ class ComparadorTempoHelpDialog(QDialog):
                 "✓ Un control directo Tempo mostrado en rojo: ruido o nocturnidad.",
                 "✓ Absentismo en Tempo o en Partes Mensuales, aunque la diferencia final sea 0:00.",
                 "✓ Falta de fichaje de entrada o de salida.",
+                "✓ Solo aparece en uno de los dos orígenes: se añade al listado final, con todos los tiempos en −.",
             ):
                 checks_layout.addWidget(self._label(text, "helpChecklistItem"))
             layout.addWidget(checks)
@@ -253,8 +267,31 @@ class ComparadorTempoHelpDialog(QDialog):
                 "Una diferencia de 0:01 o menor no incluye por sí sola al trabajador. Por ejemplo, Tempo 8:00 y Partes Mensuales 7:59 no dispara una revisión.",
             ))
             layout.addWidget(self._callout(
+                "Recuentos por sección: antes de filtrar diferencias",
+                "Cada sección indica cuántos trabajadores aparecen en Partes Mensuales y cuántos se encuentran también "
+                "en Tempo mediante un código verificado. Incluye a quienes no tienen diferencias. Ejemplo: ML · Partes Mensuales: 25 · "
+                "Tempo: 24 indica que falta una correspondencia en Tempo. Los duplicados del mismo código no aumentan el recuento. "
+                "También se muestran las secciones sin diferencias.",
+            ))
+            layout.addWidget(self._callout(
+                "Al final: trabajadores que faltan en un origen",
+                "Si solo está en PM, Incidencias indica «No aparece en Tempo» y su sección. Si solo está en Tempo, "
+                "indica «No aparece en Partes Mensuales» y «Sección: Sin asignar». Todos sus tiempos y diferencias son −: "
+                "no se calcula contra un trabajador ausente. Puedes verlos juntos con el filtro «Solo en un origen».",
+                "warning",
+            ))
+            layout.addWidget(self._callout(
+                "Qué puede y qué no puede decir el recuento",
+                "Los trabajadores que solo están en Tempo no se suman a una sección, porque ese archivo no permite asignarla "
+                "con seguridad. Revisa siempre el listado final, incluso si los recuentos de una sección coinciden. Una identidad "
+                "ambigua queda documentada en el Excel de incidencias; no se inventa una correspondencia.",
+            ))
+            layout.addWidget(self._callout(
                 "Dos Excel de salida",
-                "El informe principal contiene los trabajadores a revisar. El Excel de incidencias conserva además datos de apoyo: códigos no encontrados, duplicados y marcajes detectados.",
+                "El informe principal contiene las diferencias por sección y, al final, las personas que faltan en un origen. "
+                "El Excel de incidencias conserva los valores originales y los datos de apoyo: códigos no encontrados, "
+                "identidades no verificables, duplicados y marcajes detectados. Usa el filtro de sección y la búsqueda por nombre "
+                "o código para revisar la vista previa. Los recuentos de origen no cambian al buscar un trabajador.",
                 "success",
             ))
 
