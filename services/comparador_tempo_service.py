@@ -28,6 +28,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from core.exceptions import ProcessingCancelled
+from core.comparison_style import comparison_colors
 from core.models import ComparatorIncident, ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
 from services.diagnostics import RunDiagnostics
 from services.output_lock import OutputLock
@@ -59,7 +60,7 @@ SAP_COLUMNS = (
 TOLERANCE_MINUTES = 1
 MISSING_MARKING_MESSAGES = frozenset({"Falta fichaje de entrada", "Falta fichaje de salida"})
 COMBINED_EXTRA_BOLSA_SECTIONS = frozenset({"ML", "MS", "MC", "MV"})
-SPECIAL_NOISE_SECTIONS = frozenset({"ADMON", "C", "CAL", "COMP", "EXP", "RRHH", "RT", "SV", "SVC", "TIC", "MTO"})
+SPECIAL_NOISE_SECTIONS = frozenset({"ADMON", "C", "CAL", "COMP", "X", "RRHH", "RT", "SV", "SVC", "TIC", "MTO"})
 SPECIAL_NOCTURNITY_SECTIONS = frozenset({"ADMON", "RRHH"})
 OUTPUT_REPLACE_ATTEMPTS = 12
 OUTPUT_REPLACE_DELAY_SECONDS = 0.25
@@ -948,7 +949,7 @@ class ComparadorTempoService:
         sheet["A1"].fill = PatternFill("solid", fgColor="123283")
         sheet["A1"].alignment = Alignment(horizontal="left")
         sheet.merge_cells(f"A2:{last_column}2")
-        sheet["A2"] = "Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM. En rojo se muestran los controles directos Tempo y el diferencial de absentismo; en amarillo, las diferencias superiores a un minuto."
+        sheet["A2"] = "Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM. Verde: diferencia negativa. Amarillo: positiva. Rojo: controles especiales y absentismo. Ceros, guiones e incidencias sin resaltado."
         sheet["A2"].font = Font(italic=True, color="52627A")
         sheet["A2"].alignment = Alignment(wrap_text=True, vertical="center")
         sheet.row_dimensions[2].height = 32
@@ -996,9 +997,6 @@ class ComparadorTempoService:
                     incidence_text += f" · Sección: {item.section or 'Sin asignar'}"
                 incidence_cell = sheet.cell(row_index, 3, incidence_text)
                 incidence_cell.alignment = Alignment(vertical="center", wrap_text=True)
-                if item.incidence_messages:
-                    incidence_cell.fill = PatternFill("solid", fgColor="FFF4CC")
-                    incidence_cell.font = Font(bold=True, color="7A4C00")
                 daily_cell = sheet.cell(row_index, 4, "-" if item.missing_source else _minutes_as_excel(item.sap_daily_work_minutes))
                 daily_cell.number_format = "[h]:mm"
                 daily_cell.alignment = Alignment(horizontal="center")
@@ -1008,9 +1006,10 @@ class ComparadorTempoService:
                     "-" if "Control" in item.suppressed_fields else _signed_minutes_text(item.sap_daily_minus_noise_minutes or 0),
                 )
                 daily_difference_cell.alignment = Alignment(horizontal="center")
-                if "Control" in item.trigger_fields:
-                    daily_difference_cell.fill = PatternFill("solid", fgColor="FFF4CC")
-                    daily_difference_cell.font = Font(bold=True, color="7A4C00")
+                colors = comparison_colors(item.sap_daily_minus_noise_minutes, suppressed="Control" in item.suppressed_fields)
+                if colors:
+                    daily_difference_cell.fill = PatternFill("solid", fgColor=colors[0])
+                    daily_difference_cell.font = Font(bold=True, color=colors[1])
                 for column_index, title in enumerate(COMPARISON_COLUMNS, start=6):
                     is_red_control = title in item.red_fields
                     cell = sheet.cell(
@@ -1022,12 +1021,10 @@ class ComparadorTempoService:
                         ),
                     )
                     cell.alignment = Alignment(horizontal="center")
-                    if is_red_control:
-                        cell.fill = PatternFill("solid", fgColor="FDE2E1")
-                        cell.font = Font(bold=True, color="9C0006")
-                    elif title in item.trigger_fields:
-                        cell.fill = PatternFill("solid", fgColor="FFF4CC")
-                        cell.font = Font(bold=True, color="7A4C00")
+                    colors = comparison_colors(item.values_minutes[title], red=is_red_control, suppressed=title in item.suppressed_fields)
+                    if colors:
+                        cell.fill = PatternFill("solid", fgColor=colors[0])
+                        cell.font = Font(bold=True, color=colors[1])
                 has_absence_control = "ABSENT" in item.red_fields
                 absent_cell = sheet.cell(
                     row_index,
@@ -1036,8 +1033,9 @@ class ComparadorTempoService:
                 )
                 absent_cell.alignment = Alignment(horizontal="center")
                 if has_absence_control:
-                    absent_cell.fill = PatternFill("solid", fgColor="FDE2E1")
-                    absent_cell.font = Font(bold=True, color="9C0006")
+                    colors = comparison_colors(item.values_minutes["ABSENT"], red=True)
+                    absent_cell.fill = PatternFill("solid", fgColor=colors[0])
+                    absent_cell.font = Font(bold=True, color=colors[1])
                 if item.missing_source:
                     sheet.row_dimensions[row_index].height = 42
                 row_index += 1

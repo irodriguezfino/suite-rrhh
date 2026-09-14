@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.models import ComparatorIncident, ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
+from core.comparison_style import comparison_colors
 from services.comparador_tempo_service import RESULT_COLUMNS, TIME_COLUMNS
 from ui.dialogs.comparador_tempo_help_dialog import ComparadorTempoHelpDialog
 from ui.dialogs.details_dialog import DetailsDialog
@@ -156,7 +157,7 @@ class ComparadorTempoPage(QWidget):
             "• Diferencias por sección y, al final, trabajadores que faltan en un origen.\n"
             "• Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM.\n"
             "• Ambos a cero: −. Tiempos iguales con datos: 0:00.\n"
-            "• Amarillo: diferencia superior a un minuto. Rojo: control especial o absentismo.\n"
+            "• Verde: diferencia negativa. Amarillo: positiva. Rojo: control especial o absentismo.\n"
             "• Cada sección indica cuántos trabajadores se encuentran en cada origen."
         )
         summary_text.setObjectName("summaryCardText")
@@ -762,26 +763,18 @@ class ComparadorTempoPage(QWidget):
                 ],
                 self._format_difference(row.values_minutes.get("ABSENT", 0)) if "ABSENT" in row.red_fields else "-",
             ]
-            red_columns = {
-                5 + index
-                for index, column in enumerate(TIME_COLUMNS[:-1])
-                if column in row.red_fields
-            }
-            if "ABSENT" in row.red_fields:
-                red_columns.add(len(values) - 1)
-            difference_columns = {5 + index for index, field in enumerate(TIME_COLUMNS[:-1]) if field in row.trigger_fields}
-            if "Control" in row.trigger_fields:
-                difference_columns.add(4)
+            field_by_column = {4: "Control", **{5 + index: field for index, field in enumerate(TIME_COLUMNS)}}
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(f"Sección: {row.section or 'Sin asignar'} · Código Tempo: {row.sap_code}\n{value}")
                 item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter if column in {0, 1, 2} else Qt.AlignCenter)
-                if column in red_columns:
-                    item.setBackground(QColor("#FDE2E1"))
-                    item.setForeground(QColor("#9C0006"))
-                elif column in difference_columns or (column == 2 and row.missing_source):
-                    item.setBackground(QColor("#FFF4CC"))
-                    item.setForeground(QColor("#7A4C00"))
+                field = field_by_column.get(column)
+                if field is not None:
+                    minutes = row.sap_daily_minus_noise_minutes if field == "Control" else row.values_minutes.get(field, 0)
+                    colors = comparison_colors(minutes, red=field in row.red_fields, suppressed=value == "-")
+                    if colors:
+                        item.setBackground(QColor("#" + colors[0]))
+                        item.setForeground(QColor("#" + colors[1]))
                 self.preview_table.setItem(row_index, column, item)
         self.preview_table.resizeColumnsToContents()
         counts = result.section_counts.get(selection)

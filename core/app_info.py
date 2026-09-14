@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 APP_NAME = "Suite RRHH"
-APP_VERSION = "1.0.18"
+APP_VERSION = "1.0.19"
 REPOSITORY_OWNER = "irodriguezfino"
 REPOSITORY_NAME = "suite-rrhh"
 UPDATE_MANIFEST_URL = (

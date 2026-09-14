@@ -223,7 +223,7 @@ class ComparadorTempoHelpDialog(QDialog):
             ))
             layout.addWidget(self._callout(
                 "Ruido no permitido en determinadas secciones",
-                "En ADMON, C (Congelado), CAL, COMP, EXP, RRHH, RT, SV, SVC, TIC y MTO, Tempo no debería tener 1153-PRUI. "
+                "En ADMON, C (Congelado), CAL, COMP, X (Expediciones), RRHH, RT, SV, SVC, TIC y MTO, Tempo no debería tener 1153-PRUI. "
                 "Si Tempo tiene 0:00, Δ RUIDO muestra −, aunque PM tenga tiempo. Si Tempo tiene un valor distinto de cero, "
                 "se muestra ese valor directamente en rojo. Control sigue comparando Trab. Día Tempo − RUIDO PM.",
                 "danger",
@@ -236,13 +236,17 @@ class ComparadorTempoHelpDialog(QDialog):
             ))
             layout.addWidget(self._callout(
                 "Penosidad",
-                "Δ PENOS se calcula siempre como 1146-PPEN Tempo − PENOS PM. Se resalta en amarillo cuando "
-                "la diferencia supera un minuto.",
+                "Δ PENOS se calcula siempre como 1146-PPEN Tempo − PENOS PM. Verde si es negativa, "
+                "amarillo si es positiva y sin resaltado si es cero.",
                 "warning",
             ))
             layout.addWidget(self._callout(
-                "Rojo no siempre significa una diferencia",
-                "El rojo identifica un control directo de Tempo o un absentismo existente. El amarillo identifica una diferencia normal o de Control que supera el margen admitido.",
+                "Cómo leer los colores",
+                "Verde: diferencia negativa (Tempo tiene menos tiempo que PM). Amarillo: diferencia positiva (Tempo tiene más). "
+                "Rojo: controles especiales y absentismo, con prioridad aunque el resultado sea negativo o cero. "
+                "Los ceros normales, los guiones y el texto de Incidencias no llevan resaltado. "
+                "El color se aplica también a Control y a diferencias de un minuto si la fila aparece por otro motivo; "
+                "la tolerancia para incluir trabajadores sigue siendo superior a un minuto.",
                 "warning",
             ))
 

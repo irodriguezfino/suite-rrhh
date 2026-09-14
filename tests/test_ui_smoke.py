@@ -62,6 +62,22 @@ class UiSmokeTests(unittest.TestCase):
         finally:
             reopened.close()
 
+    def test_preview_colors_follow_sign_and_incidents_stay_plain(self):
+        window = MainWindow()
+        page = window.comparador_page
+        row = ComparatorRow("TR", "1", "Ana", {"H. EXTRAS": -30, "HFJ (15%)": 1, "BOLSA (X%)": 0, "NOCTUR": 0, "PENOS": -1, "RUIDO": 0, "ABSENT": -15},
+                            incidence_messages=("Falta fichaje de salida",), suppressed_fields=("BOLSA (X%)",),
+                            sap_daily_minus_noise_minutes=-1, red_fields=("ABSENT",))
+        try:
+            page._on_success(ComparatorResult(Path("result.xlsx"), Path("incidents.xlsx"), (row,), (), ("TR",), 1, ()))
+            for column, color in {4: "#e2f0d9", 5: "#e2f0d9", 6: "#fff4cc", 9: "#e2f0d9", 11: "#fde2e1"}.items():
+                self.assertEqual(page.preview_table.item(0, column).background().color().name(), color)
+            for column in (2, 7, 8):
+                self.assertEqual(page.preview_table.item(0, column).background().style(), Qt.NoBrush)
+            self.assertFalse(page.preview_table.item(0, 2).font().underline())
+        finally:
+            window.close()
+
     def test_comparator_result_transport_preview_dashes_and_missing_filter(self):
         window = MainWindow()
         page = window.comparador_page

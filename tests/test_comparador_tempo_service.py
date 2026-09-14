@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
 
-from core.models import ComparatorRequest
+from core.models import ComparatorRequest, ComparatorRow
 from services.comparador_tempo_service import (
     ComparadorTempoService,
     _excel_duration_to_minutes,
@@ -21,6 +21,37 @@ from services.comparador_tempo_service import (
 
 
 class ComparadorTempoServiceTests(unittest.TestCase):
+    def test_expediciones_x_uses_noise_exception(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._comparison_fixture(Path(directory), {
+                "1": ("X", "Ana", {"RUIDO": 480}, {"Trab. Dia": 480}),
+                "2": ("X", "Bea", {"RUIDO": 480}, {"Trab. Dia": 480, "1153-PRUI": 30}),
+            })
+            self.assertEqual([row.worker for row in result.rows], ["Bea"])
+            self.assertEqual(result.rows[0].values_minutes["RUIDO"], 30)
+            self.assertIn("RUIDO", result.rows[0].red_fields)
+
+    def test_excel_colors_follow_sign_with_red_priority_and_plain_incidents(self):
+        values = {**dict.fromkeys(TIME_COLUMNS, 0), "H. EXTRAS": -30, "HFJ (15%)": 1, "PENOS": -1, "ABSENT": -15}
+        rows = [ComparatorRow(
+            "TR", "1001", "Ana", values, incidence_messages=("Falta fichaje de salida",),
+            suppressed_fields=("BOLSA (X%)",), sap_daily_minus_noise_minutes=-1, red_fields=("ABSENT",),
+        )]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "colors.xlsx"
+            ComparadorTempoService()._save_main_workbook(output, rows)
+            workbook = load_workbook(output)
+            try:
+                sheet = workbook.active
+                for address, color in {"E6": "E2F0D9", "F6": "E2F0D9", "G6": "FFF4CC", "J6": "E2F0D9", "L6": "FDE2E1"}.items():
+                    self.assertTrue(sheet[address].fill.fgColor.rgb.endswith(color), address)
+                for address in ("C6", "H6", "I6"):
+                    self.assertIsNone(sheet[address].fill.patternType, address)
+                self.assertIsNone(sheet["C6"].font.underline)
+                self.assertFalse(sheet["C6"].font.bold)
+            finally:
+                workbook.close()
+
     def test_worker_moving_sections_uses_latest_section_in_selected_period(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -262,7 +293,7 @@ class ComparadorTempoServiceTests(unittest.TestCase):
             workbook = load_workbook(output, data_only=True)
             self.assertEqual(workbook["Resultado"][1][0].value, "Comparador de Tempo · Resultado")
             self.assertEqual(workbook["Resultado"][6][7].value, "-1:00")
-            self.assertTrue(workbook["Resultado"][6][7].fill.fgColor.rgb.endswith("FFF4CC"))
+            self.assertTrue(workbook["Resultado"][6][7].fill.fgColor.rgb.endswith("E2F0D9"))
             self.assertEqual(workbook["Resultado"][5][0].value, "Código SAP")
             self.assertEqual(workbook["Resultado"][6][0].value, "1001")
             workbook.close()
