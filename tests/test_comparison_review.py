@@ -25,13 +25,13 @@ def example_row(section="TR", code="100", name="ÁLVAREZ GARCÍA ANA"):
     pm = {field: 0 for field in TIME_COLUMNS}
     pm.update({"RUIDO": 480, "H. EXTRAS": 60, "PENOS": 30})
     tempo = {field: 0 for field in SAP_FIELD_BY_TEMPO.values()}
-    tempo.update({"Trab. Dia": 450, "1016-HE": 30, "1146-PPEN": 50, "1153-PRUI": 480})
+    tempo.update({"Trab. Real": 450, "Trab. Dia": 600, "1016-HE": 30, "1146-PPEN": 50, "1153-PRUI": 480})
     row = ComparatorRow(
         section, code, name,
         {"H. EXTRAS": -30, "HFJ (15%)": 0, "BOLSA (X%)": 0, "NOCTUR": 0,
          "PENOS": 20, "RUIDO": 0, "ABSENT": 0},
         trigger_fields=("Control", "H. EXTRAS", "PENOS"),
-        sap_daily_work_minutes=450, sap_daily_minus_noise_minutes=-30,
+        sap_daily_work_minutes=600, sap_daily_minus_noise_minutes=-30,
         suppressed_fields=("HFJ (15%)", "BOLSA (X%)", "NOCTUR", "ABSENT"),
         pm_source_minutes=pm, tempo_source_minutes=tempo,
     )
@@ -78,6 +78,10 @@ class ComparisonReviewTests(unittest.TestCase):
         result = self.load_rows([row])
         self.assertEqual(self.page._last_result, result)
         self.assertIn("7:30 − 8:00 = −0:30", calculation_text(row, "Control"))
+        self.assertIn("Trab. Real", calculation_text(row, "Control"))
+        self.assertNotIn("Trab. Dia", calculation_text(row, "Control"))
+        self.assertEqual(comparison_triplet(row, "Control")[:3], ("7:30", "8:00", "−0:30"))
+        self.assertEqual(comparison_triplet(row, "Trab. Día Tempo")[0], "10:00")
         self.assertIn("0:30 − 1:00 = −0:30", calculation_text(row, "H. EXTRAS"))
         self.assertIn("0:50 − 0:30 = +0:20", calculation_text(row, "PENOS"))
         self.assertIn("no son cero", calculation_text(row, "RUIDO"))
@@ -269,6 +273,7 @@ class ComparisonReviewTests(unittest.TestCase):
                 tempo = {key: 0 for key in SAP_FIELD_BY_TEMPO.values()}
                 tempo[SAP_FIELD_BY_TEMPO[field]] = tempo_value
                 tempo["Trab. Dia"] = 0
+                tempo["Trab. Real"] = 0
                 rows, _ = ComparadorTempoService()._compare(
                     {section: [{"worker": name, "values": pm}]},
                     {section: {_worker_key(name): {"100"}}}, [],

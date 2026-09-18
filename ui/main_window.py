@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QThread, QTimer, Qt
-from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStackedWidget, QToolBar
+from PySide6.QtGui import QAction, QActionGroup, QIcon
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStackedWidget, QToolBar, QWidget, QSizePolicy
 
 from core.app_info import APP_VERSION
 from services.update_service import UpdateService
@@ -10,7 +10,7 @@ from ui.pages.fase1_page import Fase1Page
 from ui.pages.comparador_tempo_page import ComparadorTempoPage
 from ui.pages.home_page import HomePage
 from ui.theme import APP_ICON
-from workers.update_worker import UpdateWorker
+from workers.background_task import BackgroundTask
 
 
 class MainWindow(QMainWindow):
@@ -29,7 +29,6 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget(self)
         self.setCentralWidget(self.stack)
         self._update_thread: QThread | None = None
-        self._update_worker: UpdateWorker | None = None
         self.home_page = HomePage()
         self.fase1_page = Fase1Page()
         self.comparador_page = ComparadorTempoPage()
@@ -40,8 +39,14 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self.home_page.open_phase1.connect(self.show_phase1)
         self.home_page.open_comparador.connect(self.show_comparador)
+        self.home_page.phase1_help.connect(self.fase1_page.show_context_help)
+        self.home_page.comparator_help.connect(self.comparador_page.show_context_help)
+        self.home_page.help_requested.connect(self.show_help)
+        self.home_page.updates_requested.connect(lambda: self._start_update_check(manual=True))
+        self.home_page.news_requested.connect(self._show_news)
         self.fase1_page.back_requested.connect(self.show_home)
         self.comparador_page.back_requested.connect(self.show_home)
+        self.stack.currentChanged.connect(self._sync_navigation)
         self.show_home()
         QTimer.singleShot(0, self._start_update_check)
 
@@ -74,6 +79,14 @@ class MainWindow(QMainWindow):
         self.comparador_action.setShortcut("Alt+2")
         self.comparador_action.triggered.connect(self.show_comparador)
         toolbar.addAction(self.comparador_action)
+        self.navigation_group = QActionGroup(self)
+        self.navigation_group.setExclusive(True)
+        for action in (self.home_action, self.control_tempo_action, self.comparador_action):
+            action.setCheckable(True)
+            self.navigation_group.addAction(action)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar.addWidget(spacer)
         toolbar.addSeparator()
 
         help_action = QAction("Ayuda", self)
@@ -89,16 +102,32 @@ class MainWindow(QMainWindow):
     def show_home(self) -> None:
         current = self.stack.currentWidget()
         if current is self.fase1_page and not self.fase1_page.request_leave():
+            self._sync_navigation()
             return
         if current is self.comparador_page and not self.comparador_page.request_leave():
+            self._sync_navigation()
             return
         self.stack.setCurrentWidget(self.home_page)
+        self._sync_navigation()
 
     def show_phase1(self) -> None:
+        if self.stack.currentWidget() is self.comparador_page and not self.comparador_page.request_leave():
+            self._sync_navigation()
+            return
         self.stack.setCurrentWidget(self.fase1_page)
 
     def show_comparador(self) -> None:
+        if self.stack.currentWidget() is self.fase1_page and not self.fase1_page.request_leave():
+            self._sync_navigation()
+            return
         self.stack.setCurrentWidget(self.comparador_page)
+
+    def _sync_navigation(self, *args) -> None:
+        for action, page in ((self.home_action, self.home_page), (self.control_tempo_action, self.fase1_page), (self.comparador_action, self.comparador_page)):
+            action.setChecked(self.stack.currentWidget() is page)
+
+    def _show_news(self) -> None:
+        QMessageBox.information(self, "Novedades · v1.0.22", "• Control = Trab. Real de Tempo − RUIDO de Partes Mensuales.\n• Inicio con tarjetas verticales, distribución adaptable y guías directas.\n• Exportación e importación de comparaciones completas (.rrhh).\n• Consulta con filtros y detalles sin los Excel originales.\n\nLas comparaciones importadas conservan sus resultados y explicaciones originales: no se recalculan ni se editan. Para nuevas comparaciones, exporta Tempo con la columna Trab. Real.")
 
     def show_help(self) -> None:
         if self.stack.currentWidget() is self.fase1_page:
@@ -115,27 +144,44 @@ class MainWindow(QMainWindow):
             "• Comparador de Tempo contrasta Partes Mensuales y Tempo por código de trabajador.",
         )
 
-    def _start_update_check(self) -> None:
+    def _start_update_check(self, *, manual=False) -> None:
         """Comprueba en segundo plano solo las instalaciones reales, no el desarrollo."""
-        if self._update_thread is not None or not UpdateService.is_installed_copy():
+        if self._update_thread is not None or (not manual and not UpdateService.is_installed_copy()):
             return
-        self._update_thread = QThread(self)
-        self._update_worker = UpdateWorker()
-        self._update_worker.moveToThread(self._update_thread)
-        self._update_thread.started.connect(self._update_worker.run)
-        self._update_worker.available.connect(self._on_update_available)
-        self._update_worker.available.connect(self._update_thread.quit)
-        self._update_worker.unavailable.connect(self._update_thread.quit)
-        self._update_worker.failed.connect(self._update_thread.quit)
-        self._update_thread.finished.connect(self._update_worker.deleteLater)
+        self.home_page.updates_button.setEnabled(False)
+        self.home_page.update_status.setText("Buscando…")
+        self._update_thread = BackgroundTask(lambda: UpdateService().check_for_update(), self)
         self._update_thread.finished.connect(self._on_update_thread_finished)
         self._update_thread.start()
 
     def _on_update_thread_finished(self) -> None:
+        thread = self._update_thread
         self._update_thread = None
-        self._update_worker = None
+        self.home_page.updates_button.setEnabled(True)
+        if thread is None:
+            return
+        # Deliver only after run() has returned, before a prompt can quit the app.
+        error, value = thread.error, thread.value
+        thread.deleteLater()
+        if error:
+            self._update_failed(error)
+        elif value is None:
+            self._update_unavailable()
+        else:
+            self._on_update_available(value)
+
+    def _update_unavailable(self) -> None:
+        self.home_page.update_status.setText("No hay una versión publicada más reciente")
+
+    def _update_failed(self, message) -> None:
+        self.home_page.update_status.setText("No se pudo comprobar. Inténtalo de nuevo.")
+        self.home_page.update_status.setToolTip(message)
 
     def _on_update_available(self, update) -> None:
+        self.home_page.update_status.setText(f"Disponible: v{update.version}")
+        if not UpdateService.is_installed_copy():
+            QMessageBox.information(self, "Actualización disponible", f"Hay disponible v{update.version}. Esta ejecución local no se actualizará. Abre la aplicación instalada para actualizarla.")
+            return
         if self.fase1_page.is_running or self.comparador_page.is_running:
             QMessageBox.information(
                 self,
@@ -163,6 +209,10 @@ class MainWindow(QMainWindow):
         QApplication.instance().quit()
 
     def closeEvent(self, event) -> None:
+        if self._update_thread is not None:
+            QMessageBox.information(self, "Comprobación en curso", "Espera unos segundos a que termine la consulta de actualizaciones antes de salir.")
+            event.ignore()
+            return
         if self.fase1_page.request_leave() and self.comparador_page.request_leave():
             event.accept()
         else:

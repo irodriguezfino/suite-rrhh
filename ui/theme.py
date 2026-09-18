@@ -12,6 +12,16 @@ APP_ICON = ASSETS_DIR / "ICONO_SUITE_RRHH.ico"
 RODRIGUEZ_LOGO = ASSETS_DIR / "RODRIGUEZ.png"
 FINURA_LOGO = ASSETS_DIR / "FINURA.png"
 
+# Logical pixels; the home layout grows horizontally, never by stretching text rows.
+HOME_LAYOUT = {
+    "content_max_width": 1480,
+    "wide_breakpoint": 1120,
+    "page_margin": 24,
+    "card_margin": 22,
+    "gap": 20,
+    "action_width": 224,
+}
+
 COLORS = {
     "primary": "#123283",
     "primary_hover": "#1B3891",
@@ -48,6 +58,16 @@ def apply_application_style(app) -> None:
     app.setStyleSheet(f"""
         * {{ font-family: 'Segoe UI'; font-size: 11pt; color: {COLORS['text']}; }}
         QMainWindow, QDialog {{ background: {COLORS['background']}; }}
+        QWidget#homeSurface {{ background: {COLORS['background']}; }}
+        QFrame#homeToolCard {{ background: #FFFFFF; border: 1px solid #D7DFEF; border-radius: 12px; }}
+        QFrame#homeToolSummary {{ background: #F1F5FC; border: 1px solid #E2EAF7; border-radius: 10px; }}
+        QFrame#homeHelpCard {{ background: #EAF2FF; border: 1px solid #D2E2FF; border-radius: 10px; }}
+        QLabel#homeToolTitle {{ font-size: 21pt; font-weight: 700; color: #172033; }}
+        QLabel#homeHelpTitle {{ font-size: 15pt; font-weight: 700; color: #123283; }}
+        QLabel#homeEyebrow {{ font-size: 10pt; color: #52627A; }}
+        QLabel#homeChips {{ color: #123283; background: #EEF3FD; border-radius: 8px; padding: 5px 9px; }}
+        QLabel#homeToolIcon {{ background: #EAF2FF; border-radius: 10px; padding: 12px; }}
+        QToolBar QToolButton:checked {{ background: #E6EEFF; color: #123283; border-bottom: 3px solid #2F6FED; }}
         QWidget#pageSurface, QFrame#card, QGroupBox {{ background: {COLORS['surface']}; }}
         QFrame#card {{ border: 1px solid {COLORS['border']}; border-radius: 12px; }}
         QFrame#compactPanel {{ background: #F8FAFE; border: 1px solid {COLORS['border']}; border-radius: 9px; }}

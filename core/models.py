@@ -62,12 +62,15 @@ class ComparatorRow:
     incidence_messages: tuple[str, ...] = ()
     sap_daily_work_minutes: int | None = None
     suppressed_fields: tuple[str, ...] = ()
+    # Historical serialized name retained for .rrhh compatibility. Since 1.0.22:
+    # Control = Tempo Trab. Real - PM RUIDO; daily work stays informational.
     sap_daily_minus_noise_minutes: int | None = None
     red_fields: tuple[str, ...] = ()
     missing_source: str = ""
     # Original totals for the read-only review panel; never infer them from deltas.
     pm_source_minutes: dict[str, int] = field(default_factory=dict)
     tempo_source_minutes: dict[str, int] = field(default_factory=dict)
+    review_snapshot: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -18,7 +18,7 @@ from core.comparison_style import comparison_colors
 from ui.theme import COLORS
 from services.comparador_tempo_service import (
     COMBINED_EXTRA_BOLSA_SECTIONS, MISSING_MARKING_MESSAGES, SAP_FIELD_BY_TEMPO,
-    SPECIAL_NOCTURNITY_SECTIONS, SPECIAL_NOISE_SECTIONS, TIME_COLUMNS,
+    SPECIAL_NOCTURNITY_SECTIONS, SPECIAL_NOISE_SECTIONS, TIME_COLUMNS, CONTROL_SOURCE_FIELD,
 )
 
 
@@ -86,6 +86,8 @@ def duration(minutes: int | None, signed: bool = False) -> str:
 
 def calculation_text(row: ComparatorRow, field: str) -> str:
     """Explain the existing result, using recorded originals, including exceptions."""
+    if field in row.review_snapshot:
+        return row.review_snapshot[field]['explanation']
     if row.missing_source:
         return f"No aparece en {row.missing_source}. No se comparan valores; el informe muestra —."
     if field == "Trab. Día Tempo":
@@ -99,7 +101,7 @@ def calculation_text(row: ComparatorRow, field: str) -> str:
         return "En esta sección las horas extra de PM se suman a Bolsa. El informe muestra — aquí; consulta Bolsa (X%)."
     direct = ((field == "RUIDO" and section in SPECIAL_NOISE_SECTIONS)
               or (field == "NOCTUR" and section in SPECIAL_NOCTURNITY_SECTIONS))
-    source_field = "Trab. Dia" if field == "Control" else SAP_FIELD_BY_TEMPO[field]
+    source_field = CONTROL_SOURCE_FIELD if field == "Control" else SAP_FIELD_BY_TEMPO[field]
     pm_field = "RUIDO" if field == "Control" else field
     left = tempo.get(source_field)
     right = pm.get(pm_field)
@@ -128,11 +130,13 @@ def calculation_text(row: ComparatorRow, field: str) -> str:
 
 def comparison_triplet(row: ComparatorRow, field: str) -> tuple[str, str, str, str]:
     """Presentation of recorded totals; direct controls are never labelled deltas."""
+    if field in row.review_snapshot:
+        return tuple(row.review_snapshot[field]['triplet'])
     if row.missing_source:
         return ("—", "—", "—", "Sin comparación")
     if field == "Trab. Día Tempo":
         return (duration(row.sap_daily_work_minutes), "—", "—", "Dato de origen")
-    source = "Trab. Dia" if field == "Control" else SAP_FIELD_BY_TEMPO[field]
+    source = CONTROL_SOURCE_FIELD if field == "Control" else SAP_FIELD_BY_TEMPO[field]
     pm_field = "RUIDO" if field == "Control" else field
     left = row.tempo_source_minutes.get(source)
     right = row.pm_source_minutes.get(pm_field)

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import traceback
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -15,19 +16,22 @@ from PySide6.QtCore import QElapsedTimer, QProcess, QSettings, QStandardPaths, Q
 from PySide6.QtGui import QAction, QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QBoxLayout, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QMenu, QToolButton,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QProgressBar,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QProgressBar, QProgressDialog,
     QSizePolicy, QSplitter, QStackedWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from core.models import ComparatorIncident, ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
+from core.models import ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
 from core.comparison_style import comparison_colors
 from services.comparador_tempo_service import RESULT_COLUMNS, TIME_COLUMNS
+from services.comparison_archive import load_archive, save_archive
+from services.comparison_codec import result_from_payload
+from workers.background_task import BackgroundTask
 from ui.dialogs.comparador_tempo_help_dialog import ComparadorTempoHelpDialog
 from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
 from ui.widgets.comparison_review import (
     ElidedLabel, FrozenIdentityTable, WorkerDetailPanel, calculation_text,
-    matches_reason, matches_incidence, incidence_keys, review_order, search_key, duration,
+    matches_reason, matches_incidence, incidence_keys, review_order, search_key, duration, comparison_triplet,
 )
 
 
@@ -47,6 +51,9 @@ class ComparadorTempoPage(QWidget):
         self._runner_failure: tuple[str, str] | None = None
         self._runner_cancelled = False
         self._last_result: ComparatorResult | None = None
+        self._transfer_thread = None
+        self._imported_archive = None
+        self.setAcceptDrops(True)
         self._preview_rows: list[ComparatorRow] = []
         self._detail_dialog: QDialog | None = None
         self._dialog_detail_panel: WorkerDetailPanel | None = None
@@ -73,7 +80,7 @@ class ComparadorTempoPage(QWidget):
 
     @property
     def is_running(self) -> bool:
-        return self._process is not None
+        return self._process is not None or self._transfer_thread is not None
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -172,7 +179,7 @@ class ComparadorTempoPage(QWidget):
         summary_layout.addWidget(summary_title)
         summary_text = QLabel(
             "• Diferencias por sección y, al final, trabajadores que faltan en un origen.\n"
-            "• Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM.\n"
+            "• Δ = Tempo − Partes Mensuales. Control = Trab. Real Tempo − RUIDO PM.\n"
             "• Ambos a cero: −. Tiempos iguales con datos: 0:00.\n"
             "• Verde: diferencia negativa. Amarillo: positiva. Rojo: control especial o absentismo.\n"
             "• Cada sección indica cuántos trabajadores se encuentran en cada origen."
@@ -234,6 +241,10 @@ class ComparadorTempoPage(QWidget):
         self.details_button.setEnabled(False)
         controls.addWidget(self.compare_button)
         controls.addWidget(self.clear_button)
+        self.import_button = QPushButton("Importar comparación…")
+        self.import_button.setToolTip("Abre un archivo .rrhh recibido para consultar el resultado completo, sin los Excel originales.")
+        self.import_button.clicked.connect(self._choose_import)
+        controls.addWidget(self.import_button)
         controls.addStretch(1)
         card.addLayout(controls)
         self.preparation_status_label = QLabel("Selecciona los dos archivos de origen para empezar.")
@@ -400,6 +411,12 @@ class ComparadorTempoPage(QWidget):
         preview_layout = QVBoxLayout(self.preview_group)
         preview_layout.setContentsMargins(10, 8, 10, 8)
         preview_layout.setSpacing(8)
+        self.imported_label = QLabel()
+        self.imported_label.setTextFormat(Qt.PlainText)
+        self.imported_label.setObjectName("activeFilters")
+        self.imported_label.setWordWrap(True)
+        self.imported_label.hide()
+        preview_layout.addWidget(self.imported_label)
         preview_header = QHBoxLayout()
         self.result_back_button = QPushButton("← Inicio")
         self.result_back_button.clicked.connect(self.back_requested.emit)
@@ -434,6 +451,15 @@ class ComparadorTempoPage(QWidget):
         view_menu.addAction("Cambiar archivos", self._return_to_preparation)
         view_menu.addAction("Nueva comprobación", self._clear)
         preview_header.addWidget(self.view_options)
+        self.share_button = QToolButton()
+        self.share_button.setText("Compartir")
+        self.share_button.setAccessibleName("Exportar o importar la comparación completa")
+        self.share_button.setPopupMode(QToolButton.InstantPopup)
+        share_menu = QMenu(self.share_button)
+        share_menu.addAction("Exportar comparación completa…", self._choose_export)
+        share_menu.addAction("Importar comparación…", self._choose_import)
+        self.share_button.setMenu(share_menu)
+        preview_header.addWidget(self.share_button)
         self.detail_button = QPushButton("Detalle del trabajador")
         self.detail_button.setToolTip("Valores de origen y explicación del cálculo (Intro en la tabla)")
         self.detail_button.setEnabled(False)
@@ -646,6 +672,8 @@ class ComparadorTempoPage(QWidget):
         self.result_sap_chip.setText(f"Tempo · {sap_name}")
 
     def _reset_result_presentation(self) -> None:
+        self._imported_archive = None
+        self.imported_label.hide()
         self._search_timer.stop()
         self._cell_cache.clear()
         self._search_cache.clear()
@@ -872,27 +900,125 @@ class ComparadorTempoPage(QWidget):
 
     @staticmethod
     def _result_from_payload(data: dict) -> ComparatorResult:
-        rows = tuple(
-            ComparatorRow(
-                str(item["section"]),
-                str(item["sap_code"]),
-                str(item["worker"]),
-                {str(k): int(v) for k, v in item.get("values_minutes", {}).items()},
-                tuple(str(value) for value in item.get("trigger_fields", [])),
-                tuple(str(value) for value in item.get("incidence_messages", [])),
-                item.get("sap_daily_work_minutes"),
-                tuple(str(value) for value in item.get("suppressed_fields", [])),
-                item.get("sap_daily_minus_noise_minutes"),
-                tuple(str(value) for value in item.get("red_fields", [])),
-                str(item.get("missing_source", "")),
-                {str(k): int(v) for k, v in item.get("pm_source_minutes", {}).items()},
-                {str(k): int(v) for k, v in item.get("tempo_source_minutes", {}).items()},
-            )
-            for item in data.get("rows", [])
-        )
-        incidents = tuple(ComparatorIncident(str(item["incident_type"]), str(item["section"]), str(item["sap_code"]), str(item["tempo_worker"]), str(item["sap_worker"]), str(item["field"]), item.get("tempo_minutes"), item.get("sap_minutes"), item.get("difference_minutes"), str(item["reason"]), {str(k): int(v) for k, v in item.get("tempo_values_minutes", {}).items()}, {str(k): int(v) for k, v in item.get("sap_values_minutes", {}).items()}) for item in data.get("incidents", []))
-        return ComparatorResult(Path(data["output_path"]), Path(data["incidents_path"]), rows, incidents, tuple(str(value) for value in data.get("sections", [])), float(data.get("elapsed_seconds", 0)), tuple(str(value) for value in data.get("detail_lines", [])),
-                                {str(section): {"pm": int(counts["pm"]), "tempo": int(counts["tempo"])} for section, counts in data.get("section_counts", {}).items()})
+        return result_from_payload(data)
+
+    def _choose_import(self) -> None:
+        if self.is_running:
+            return
+        chosen, _ = QFileDialog.getOpenFileName(self, "Importar comparación completa", self._last_directory("exchange"), "Comparación Suite RRHH (*.rrhh)")
+        if chosen:
+            self._import_comparison(Path(chosen))
+
+    def _import_comparison(self, path: Path) -> None:
+        if self.is_running:
+            return
+        if self._last_result is not None and QMessageBox.question(
+            self, "Abrir otra comparación", "Se sustituirá la vista actual. Los informes guardados no se borrarán. ¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        ) != QMessageBox.Yes:
+            return
+        self._run_transfer(lambda: load_archive(path), lambda archive: self._show_imported(archive, path), "Abriendo comparación…")
+
+    def _show_imported(self, archive, path) -> None:
+        self._reset_result_presentation()
+        self.tempo_edit.clear()
+        self.sap_edit.clear()
+        self._details.clear()
+        self._imported_archive = archive
+        self._on_success(archive.result)
+        self._remember_directory("exchange", path.parent)
+
+    def _choose_export(self) -> None:
+        if self.is_running or self._last_result is None:
+            return
+        filename = Path(self._last_directory("exchange")) / f"Comparacion_{datetime.now():%Y%m%d}.rrhh"
+        chosen, _ = QFileDialog.getSaveFileName(self, "Exportar comparación completa", str(filename), "Comparación Suite RRHH (*.rrhh)")
+        if not chosen:
+            return
+        path = Path(chosen)
+        if path.suffix.lower() != '.rrhh':
+            path = path.with_suffix('.rrhh')
+            if path.exists() and QMessageBox.question(self, "Sustituir archivo", "El archivo .rrhh ya existe. ¿Sustituirlo?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return
+        if QMessageBox.question(self, "Compartir datos de trabajadores",
+            "Se exportará la comparación COMPLETA, aunque tengas filtros activos, y los dos informes. "
+            "Incluye nombres, códigos, horas e incidencias. No está cifrada: envíala solo a destinatarios autorizados.\n\n¿Continuar?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        result, imported = self._last_result, self._imported_archive
+        def export():
+            snapshot_rows = tuple(replace(row, review_snapshot={field: {
+                'explanation': calculation_text(row, field), 'triplet': list(comparison_triplet(row, field))
+            } for field in ('Trab. Día Tempo', 'Control', *TIME_COLUMNS)}) for row in result.rows)
+            return save_archive(path, replace(result, rows=snapshot_rows),
+                                reports=imported.reports if imported else None,
+                                created_at=imported.created_at if imported else None,
+                                app_version=imported.app_version if imported else None)
+        def saved(value):
+            self._remember_directory("exchange", path.parent)
+            QMessageBox.information(self, "Comparación exportada", "Archivo listo para compartir:\n" + str(value) + "\n\nEl destinatario debe usar Importar comparación en una versión compatible de Suite RRHH.")
+        self._run_transfer(export, saved, "Exportando comparación completa…")
+
+    def _run_transfer(self, operation, completed, message) -> None:
+        if self.is_running:
+            return
+        progress = QProgressDialog(message, "", 0, 0, self)
+        progress.setWindowTitle("Comparación · Intercambio")
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.ApplicationModal)
+        progress.setMinimumDuration(0)
+        worker = BackgroundTask(operation, self)
+        self._transfer_thread = worker
+        def finished():
+            self._transfer_thread = None
+            progress.close()
+            progress.deleteLater()
+            try:
+                if worker.error:
+                    QMessageBox.warning(self, "No se pudo completar el intercambio", worker.error)
+                else:
+                    completed(worker.value)
+            finally:
+                worker.deleteLater()
+        worker.finished.connect(finished)
+        progress.show()
+        worker.start()
+
+    def dragEnterEvent(self, event) -> None:
+        urls = event.mimeData().urls()
+        if not self.is_running and len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() == '.rrhh':
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        urls = event.mimeData().urls()
+        if not self.is_running and len(urls) == 1 and urls[0].isLocalFile() and Path(urls[0].toLocalFile()).suffix.lower() == '.rrhh':
+            event.acceptProposedAction()
+            self._import_comparison(Path(urls[0].toLocalFile()))
+
+    def _save_imported_report(self, name) -> None:
+        chosen, _ = QFileDialog.getSaveFileName(self, "Guardar copia del informe recibido", str(Path(self._last_directory('output')) / name), "Excel (*.xlsx)")
+        if not chosen:
+            return
+        target = Path(chosen)
+        if target.suffix.lower() != '.xlsx':
+            target = target.with_suffix('.xlsx')
+            if target.exists() and QMessageBox.question(self, "Sustituir informe", "El informe ya existe. ¿Sustituirlo?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return
+        content = self._imported_archive.reports[name]
+        def save():
+            fd, temporary = tempfile.mkstemp(prefix='.rrhh-report-', dir=target.parent)
+            try:
+                with os.fdopen(fd, 'wb') as stream:
+                    stream.write(content)
+                os.replace(temporary, target)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+            return target
+        def saved(path):
+            self._remember_directory('output', path.parent)
+            QMessageBox.information(self, "Informe guardado", str(path))
+        self._run_transfer(save, saved, "Guardando copia del informe…")
+
 
     def _on_success(self, result: ComparatorResult) -> None:
         self._search_timer.stop()
@@ -900,7 +1026,8 @@ class ComparadorTempoPage(QWidget):
         self._search_cache = {id(row): search_key(" ".join((row.worker, row.sap_code, *row.incidence_messages))) for row in result.rows}
         self._close_worker_detail()
         self._last_result = result
-        self._remember_directory("output", result.output_path.parent)
+        if self._imported_archive is None:
+            self._remember_directory("output", result.output_path.parent)
         self._details.extend(result.detail_lines)
         self.progress.setValue(self.progress.maximum())
         self._set_status(f"Comparación terminada: {len(result.rows)} trabajadores para revisar y {len(result.incidents)} incidencias auditables.", "statusSuccess")
@@ -942,6 +1069,17 @@ class ComparadorTempoPage(QWidget):
         for button in (self.open_result_button, self.open_incidents_button, self.open_folder_button):
             button.setVisible(True)
         self._show_view("result")
+        imported = self._imported_archive
+        self.imported_label.setVisible(imported is not None)
+        self.sources_action.setEnabled(imported is None)
+        self.sources_action.setChecked(False)
+        self.open_result_button.setText("Guardar resultado" if imported else "Abrir resultado")
+        self.open_incidents_button.setText("Guardar incidencias" if imported else "Abrir incidencias")
+        self.open_folder_button.setVisible(imported is None)
+        if imported:
+            self.imported_label.setText(f"Comparación importada · Modo consulta · Exportada {imported.created_at} · Versión {imported.app_version} · Resultado completo, sin recalcular")
+            self.result_summary_label.setText("Comparación importada · Solo consulta")
+            self.details_button.setEnabled(False)
         self.section_filter.setFocus()
 
     def _refresh_preview(self) -> None:
@@ -1073,7 +1211,7 @@ class ComparadorTempoPage(QWidget):
         return self._preview_rows[index] if 0 <= index < len(self._preview_rows) else None
 
     def _set_review_tab_order(self) -> None:
-        controls = (self.result_back_button, self.paths_button, self.view_options, self.section_filter, self.worker_search,
+        controls = (self.result_back_button, self.paths_button, self.view_options, self.share_button, self.section_filter, self.worker_search,
                     self.reason_filter, self.incidence_filter, self.reset_filters_button, self.legend_help,
                     self.preview_table, self.detail_button, self.worker_detail.expand_button, self.worker_detail.close_button,
                     self.worker_detail.previous_button, self.worker_detail.next_button,
@@ -1101,6 +1239,9 @@ class ComparadorTempoPage(QWidget):
             self.preview_table.setCurrentCell(index, self.preview_table.currentColumn())
 
     def _show_source_paths(self) -> None:
+        if self._imported_archive:
+            QMessageBox.information(self, "Comparación recibida", "Esta comparación no necesita los Excel originales. Usa Guardar resultado o Guardar incidencias para obtener una copia de los informes recibidos.")
+            return
         dialog = QDialog(self)
         dialog.setWindowTitle("Archivos de la comprobación")
         dialog.setAttribute(Qt.WA_DeleteOnClose)
@@ -1287,10 +1428,16 @@ class ComparadorTempoPage(QWidget):
         DetailsDialog(self._details or ["Aún no hay detalles de comparación."], self).exec()
 
     def _open_result(self) -> None:
+        if self._imported_archive:
+            self._save_imported_report('resultado.xlsx')
+            return
         if self._last_result:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_result.output_path)))
 
     def _open_incidents(self) -> None:
+        if self._imported_archive:
+            self._save_imported_report('incidencias.xlsx')
+            return
         if self._last_result:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_result.incidents_path)))
 
@@ -1302,6 +1449,9 @@ class ComparadorTempoPage(QWidget):
         ComparadorTempoHelpDialog(self).exec()
 
     def request_leave(self) -> bool:
+        if self._transfer_thread is not None:
+            QMessageBox.information(self, "Intercambio en curso", "Espera a que termine la importación o exportación antes de salir.")
+            return False
         if not self.is_running:
             return True
         answer = QMessageBox.question(self, "Comparación en curso", "Hay una comparación en curso. ¿Solicitar su cancelación?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)

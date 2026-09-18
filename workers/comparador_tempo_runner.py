@@ -57,6 +57,7 @@ def _row_payload(row: ComparatorRow) -> dict[str, Any]:
         "missing_source": row.missing_source,
         "pm_source_minutes": row.pm_source_minutes,
         "tempo_source_minutes": row.tempo_source_minutes,
+        "review_snapshot": row.review_snapshot,
     }
 
 

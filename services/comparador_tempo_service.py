@@ -53,9 +53,10 @@ SAP_FIELD_BY_TEMPO = {
     "RUIDO": "1153-PRUI",
     "ABSENT": "1052-HDESC",
 }
+CONTROL_SOURCE_FIELD = "Trab. Real"
 SAP_COLUMNS = (
     "1016-HE", "1129-HE15%", "1166-HE30%", "1166-HE35%", "1014-HNOC", "1146-PPEN",
-    "1153-PRUI", "1052-HDESC", "Trab. Dia",
+    "1153-PRUI", "1052-HDESC", "Trab. Dia", CONTROL_SOURCE_FIELD,
 )
 TOLERANCE_MINUTES = 1
 MISSING_MARKING_MESSAGES = frozenset({"Falta fichaje de entrada", "Falta fichaje de salida"})
@@ -616,6 +617,7 @@ class ComparadorTempoService:
         rows: Iterable[dict[int, object]],
     ) -> tuple[dict[str, dict], set[str]]:
         headers: dict[str, int] | None = None
+        missing_real_header = False
         mark_columns: tuple[int, int] | None = None
         totals: dict[str, dict] = {}
         duplicate_codes: set[str] = set()
@@ -628,6 +630,9 @@ class ComparadorTempoService:
             if headers is None:
                 by_header = {_normalise_header(value): column for column, value in values.items()}
                 required = {_normalise_header(value) for value in SAP_COLUMNS}
+                real_header = _normalise_header(CONTROL_SOURCE_FIELD)
+                if (required - {real_header}).issubset(by_header) and real_header not in by_header:
+                    missing_real_header = True
                 if required.issubset(by_header):
                     headers = {value: by_header[_normalise_header(value)] for value in SAP_COLUMNS}
                     marks = [column for column, value in values.items() if _normalise_header(value) == "MARCAJES"]
@@ -672,6 +677,12 @@ class ComparadorTempoService:
                 if message and message not in marking_incidents[current_worker[0]]:
                     marking_incidents[current_worker[0]].append(message)
         if headers is None:
+            if missing_real_header:
+                raise ValueError(
+                    "No se localizaron las columnas Tempo necesarias: falta Trab. Real. "
+                    "Exporta de nuevo el informe de Tempo incluyendo esa columna. "
+                    "Control requiere Trab. Real y no se sustituye por Trab. Dia."
+                )
             expected = ", ".join(SAP_COLUMNS)
             raise ValueError(f"No se localizaron las columnas Tempo necesarias: {expected}.")
         if not totals:
@@ -807,14 +818,14 @@ class ComparadorTempoService:
                         trigger_fields.add(tempo_field)
                         incidents.append(self._incident("Diferencia", section, code, worker, sap["worker"], comparison_name, compared_tempo_minutes, sap_values.get(sap_field, 0), difference, f"{reason_prefix}La diferencia supera {TOLERANCE_MINUTES} minuto.", values, sap_values))
 
-                control_difference = sap_values.get("Trab. Dia", 0) - values["RUIDO"]
+                control_difference = sap_values[CONTROL_SOURCE_FIELD] - values["RUIDO"]
                 control_requires_review = abs(control_difference) > TOLERANCE_MINUTES
                 if control_requires_review:
                     trigger_fields.add("Control")
                     incidents.append(self._incident(
                         "Diferencia", section, code, worker, sap["worker"], "Control",
-                        values["RUIDO"], sap_values.get("Trab. Dia", 0), control_difference,
-                        f"Control: Trab. Día Tempo − RUIDO PM. La diferencia supera {TOLERANCE_MINUTES} minuto.",
+                        values["RUIDO"], sap_values[CONTROL_SOURCE_FIELD], control_difference,
+                        f"Control: Trab. Real Tempo − RUIDO PM. La diferencia supera {TOLERANCE_MINUTES} minuto.",
                         values, sap_values,
                     ))
 
@@ -881,7 +892,7 @@ class ComparadorTempoService:
                         suppressed.add("RUIDO")
                     if has_special_nocturnity_rule and sap_values.get("1014-HNOC", 0) == 0:
                         suppressed.add("NOCTUR")
-                    if sap_values.get("Trab. Dia", 0) == 0 and values["RUIDO"] == 0:
+                    if sap_values[CONTROL_SOURCE_FIELD] == 0 and values["RUIDO"] == 0:
                         suppressed.add("Control")
                     result.append(ComparatorRow(
                         section, code, worker, displayed_values, ordered_triggers,
@@ -950,7 +961,7 @@ class ComparadorTempoService:
         sheet["A1"].fill = PatternFill("solid", fgColor="123283")
         sheet["A1"].alignment = Alignment(horizontal="left")
         sheet.merge_cells(f"A2:{last_column}2")
-        sheet["A2"] = "Δ = Tempo − Partes Mensuales. Control = Trab. Día Tempo − RUIDO PM. Verde: diferencia negativa. Amarillo: positiva. Rojo: controles especiales y absentismo. Ceros, guiones e incidencias sin resaltado."
+        sheet["A2"] = "Δ = Tempo − Partes Mensuales. Control = Trab. Real Tempo − RUIDO PM. Verde: diferencia negativa. Amarillo: positiva. Rojo: controles especiales y absentismo. Ceros, guiones e incidencias sin resaltado."
         sheet["A2"].font = Font(italic=True, color="52627A")
         sheet["A2"].alignment = Alignment(wrap_text=True, vertical="center")
         sheet.row_dimensions[2].height = 32

@@ -124,7 +124,7 @@ class ComparadorTempoHelpDialog(QDialog):
             steps = QHBoxLayout()
             steps.setSpacing(12)
             steps.addWidget(self._step_card("1", "Selecciona Partes Mensuales", "El Excel con la tabla dinámica y el periodo que quieres revisar."))
-            steps.addWidget(self._step_card("2", "Selecciona Tempo", "El Excel Tempo de tiempos por trabajador, en formato .xls o .xlsx."))
+            steps.addWidget(self._step_card("2", "Selecciona Tempo", "El Excel Tempo de tiempos por trabajador, en formato .xls o .xlsx. Debe incluir Trab. Real para calcular Control."))
             steps.addWidget(self._step_card("3", "Comprueba y revisa", "Se crean el informe principal y un Excel independiente de incidencias."))
             layout.addLayout(steps)
             layout.addWidget(self._callout(
@@ -136,6 +136,17 @@ class ComparadorTempoHelpDialog(QDialog):
                 "si alguien tiene varias, podrás encontrarlo por cualquiera de ellas. Todos los filtros se combinan. "
                 "El resumen de filtros activos explica qué estás viendo; Quitar filtros recupera todas las filas. "
                 "Los recuentos de origen no cambian al buscar. Los filtros solo cambian la vista: no modifican el Excel completo ni sus cálculos.",
+            ))
+            layout.addWidget(self._callout(
+                "Comparte la revisión sin los archivos originales",
+                "En el resultado, abre Compartir → Exportar comparación completa. El archivo .rrhh incluye TODOS los trabajadores "
+                "del resultado, aunque haya filtros activos, los valores de origen necesarios para el detalle, los motivos, "
+                "los recuentos y los dos informes generados. No incluye los Excel originales ni las rutas privadas del registro. "
+                "El destinatario usa Importar comparación en la pantalla inicial o arrastra el .rrhh al comparador. "
+                "Puede buscar, filtrar y consultar detalles sin recalcular ni editar valores. Guardar resultado e incidencias "
+                "crea copias de los informes recibidos. Nueva comparación limpia la vista, no el archivo compartido. "
+                "Ambos equipos necesitan una versión compatible con este formato. El archivo contiene datos personales y no está cifrado: "
+                "compártelo solo con destinatarios autorizados. No contiene estados de revisión ni comentarios editables.",
             ))
             layout.addWidget(self._callout(
                 "Entiende el cálculo y recorre los trabajadores",
@@ -209,7 +220,7 @@ class ComparadorTempoHelpDialog(QDialog):
                 ("Trabajador", "Nombre asociado al código Tempo comparado.", "PÉREZ GARCÍA ANA"),
                 ("Incidencias", "Marcajes, ausencias u origen donde falta el trabajador. Sin incidencias: −.", "No aparece en Tempo"),
                 ("Trab. Día Tempo", "Total Tempo de Trab. Dia. No es una diferencia.", "8:00"),
-                ("Control", "Trab. Día Tempo − RUIDO PM. Se revisa si supera un minuto.", "8:00 − 7:45 = +0:15"),
+                ("Control", "Trab. Real Tempo − RUIDO PM. Se revisa si supera un minuto en valor absoluto. No utiliza Trab. Día.", "8:00 − 7:45 = +0:15"),
                 ("Δ H. EXTRAS", "1016-HE Tempo − H. EXTRAS PM.", "1:30 − 1:00 = +0:30"),
                 ("Δ HFJ (15%)", "1129-HE15% Tempo − HFJ PM.", "0:00 − 0:20 = −0:20"),
                 ("Δ BOLSA (X%)", "1166-HE35% Tempo − BOLSA PM.", "2:00 − 1:45 = +0:15"),
@@ -256,7 +267,7 @@ class ComparadorTempoHelpDialog(QDialog):
                 "Ruido no permitido en determinadas secciones",
                 "En ADMON, C (Congelado), CAL, COMP, X (Expediciones), RRHH, RT, SV, SVC, TIC y MTO, Tempo no debería tener 1153-PRUI. "
                 "Si Tempo tiene 0:00, Δ RUIDO muestra −, aunque PM tenga tiempo. Si Tempo tiene un valor distinto de cero, "
-                "se muestra ese valor directamente en rojo. Control sigue comparando Trab. Día Tempo − RUIDO PM.",
+                "se muestra ese valor directamente en rojo. Control sigue comparando Trab. Real Tempo − RUIDO PM.",
                 "danger",
             ))
             layout.addWidget(self._callout(
@@ -296,7 +307,7 @@ class ComparadorTempoHelpDialog(QDialog):
             checks_layout.setSpacing(9)
             for text in (
                 "✓ Una diferencia normal superior a un minuto.",
-                "✓ Una diferencia de Control superior a un minuto: Trab. Día Tempo − RUIDO PM.",
+                "✓ Una diferencia de Control superior a un minuto en valor absoluto: Trab. Real Tempo − RUIDO PM.",
                 "✓ Un control directo Tempo mostrado en rojo: ruido o nocturnidad.",
                 "✓ Absentismo en Tempo o en Partes Mensuales, aunque la diferencia final sea 0:00.",
                 "✓ Falta de fichaje de entrada o de salida.",
