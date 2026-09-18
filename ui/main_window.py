@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
             action.setChecked(self.stack.currentWidget() is page)
 
     def _show_news(self) -> None:
-        QMessageBox.information(self, f"Novedades · v{APP_VERSION}", "• Pulsa las cabeceras del informe para ordenar de menor a mayor y viceversa.\n• Introduce una tolerancia en minutos para filtrar diferencias pequeñas en la vista.\n• Los avisos rojos, fichajes pendientes y trabajadores sin correspondencia conservan su revisión.\n• Vista permite recuperar el orden por sección y apellidos; Quitar filtros elimina la tolerancia.\n\nNo se alteran cálculos ni informes guardados. Compartir sigue exportando la comparación completa, aunque haya filtros activos.")
+        QMessageBox.information(self, f"Novedades · v{APP_VERSION}", "• Tolerancia comienza en 0:00. Escribe 0:05 para cinco minutos o 1:30 para una hora y media. Se aplica al dejar de escribir, sin necesitar Intro.\n• El filtro Sección permite marcar varias casillas a la vez. Todas las secciones recupera la vista completa.\n• Los recuentos suman las secciones elegidas; los demás filtros y la ordenación siguen funcionando.\n• Quitar filtros restablece la selección y la tolerancia.\n\nNo se alteran cálculos ni informes guardados. Los avisos especiales se conservan y Compartir sigue exportando la comparación completa.")
 
     def show_help(self) -> None:
         if self.stack.currentWidget() is self.fase1_page:

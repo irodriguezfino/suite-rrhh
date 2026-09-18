@@ -179,7 +179,7 @@ class SharingUITests(unittest.TestCase):
     def test_export_filters_import_and_new_comparison_without_recalculation(self):
         result=fixture(self.root)
         self.page._on_success(result)
-        self.page.section_filter.setCurrentText('TR')
+        self.page.section_filter.set_selected({'TR'})
         self.assertEqual(len(self.page._preview_rows),1)
         destination=self.root/'shared.rrhh'
         with patch.object(ComparadorTempoService,'run',side_effect=AssertionError('No recalculation')), \

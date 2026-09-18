@@ -132,7 +132,11 @@ class ComparadorTempoHelpDialog(QDialog):
                 "La vista previa empieza ordenada por sección y apellidos. Pulsa una cabecera para ordenar de menor a mayor; "
                 "pulsa otra vez para invertir el orden. Las horas se ordenan numéricamente con su signo y los guiones quedan al final. "
                 "También puedes ordenar desde Vista y restablecer el orden por sección y apellidos. Sección, código y trabajador permanecen fijos "
-                "al desplazarte horizontalmente; puedes ajustar sus anchos. Combina sección, búsqueda por nombre o código (Ctrl+F) "
+                "al desplazarte horizontalmente; puedes ajustar sus anchos. Abre Sección y marca una o varias casillas: "
+                "se muestran trabajadores de cualquiera de las secciones elegidas, sin duplicarlos. Todas las secciones "
+                "elimina esa selección; sin casillas marcadas se muestran todas. Usa Espacio para marcar y Esc para cerrar. "
+                "Los recuentos suman las secciones elegidas; Solo en un origen incluye también personas sin correspondencia "
+                "y no presenta un total completo por sección. Combina secciones, búsqueda por nombre o código (Ctrl+F) "
                 "y motivo de revisión. Revisar ABSENT incluye también los absentismos en rojo cuya diferencia es cero. "
                 "El filtro Incidencia ofrece los tipos presentes en el resultado completo y Sin incidencias cuando corresponda; "
                 "si alguien tiene varias, podrás encontrarlo por cualquiera de ellas. Todos los filtros se combinan. "
@@ -141,8 +145,11 @@ class ComparadorTempoHelpDialog(QDialog):
             ))
             layout.addWidget(self._callout(
                 "Tolerancia: centra la revisión en las diferencias mayores",
-                "Introduce minutos en Tolerancia y confirma con Intro o sal del campo. Con 5 min, una diferencia de +5 o −5 "
-                "queda dentro del margen; +6 o −6 sigue requiriendo revisión. Sin filtro (0) muestra el resultado original. "
+                "Tolerancia comienza en 0:00, sin filtro adicional. Escribe horas:minutos: 0:05 son cinco minutos y "
+                "1:30 es una hora y media; admite más de 24 horas. Al entrar al campo se selecciona su contenido para sustituirlo. "
+                "Se aplica automáticamente al dejar de escribir, o inmediatamente con Intro. También admite minutos sueltos "
+                "(5 se convierte en 0:05 al salir). Un formato no válido no se aplica; el aviso del campo explica cómo corregirlo. "
+                "Con 0:05, una diferencia de +5 o −5 queda dentro del margen; +6 o −6 sigue requiriendo revisión. "
                 "La fila se oculta solo si ninguna diferencia relevante supera el margen y no tiene avisos especiales. "
                 "Si filtras un motivo concreto, el margen se aplica a ese campo. Los controles rojos (incluido ABSENT), "
                 "fichajes pendientes, trabajadores sin correspondencia y secciones pendientes de verificar se conservan. "

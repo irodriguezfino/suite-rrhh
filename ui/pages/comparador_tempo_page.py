@@ -15,9 +15,9 @@ from pathlib import Path
 from PySide6.QtCore import QElapsedTimer, QProcess, QSettings, QStandardPaths, QTimer, Qt, Signal, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QAbstractSpinBox, QApplication, QBoxLayout, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QMenu, QToolButton,
+    QApplication, QBoxLayout, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QMenu, QToolButton,
     QLabel, QLineEdit, QMessageBox, QPushButton, QProgressBar, QProgressDialog,
-    QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QSplitter, QStackedWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.models import ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
@@ -29,6 +29,7 @@ from workers.background_task import BackgroundTask
 from ui.dialogs.comparador_tempo_help_dialog import ComparadorTempoHelpDialog
 from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
+from ui.widgets.review_filters import DurationFilter, SectionFilter
 from ui.widgets.comparison_review import (
     ElidedLabel, FrozenIdentityTable, WorkerDetailPanel, calculation_text,
     matches_reason, matches_incidence, matches_tolerance, sorted_review_rows, incidence_keys, search_key, duration, comparison_triplet,
@@ -486,9 +487,8 @@ class ComparadorTempoPage(QWidget):
         filters.setSpacing(10)
         section_label = QLabel("Sección")
         filters.addWidget(section_label)
-        self.section_filter = QComboBox()
-        self.section_filter.setAccessibleName("Filtrar vista previa por sección")
-        self.section_filter.currentTextChanged.connect(self._refresh_preview)
+        self.section_filter = SectionFilter()
+        self.section_filter.selectionChanged.connect(self._refresh_preview)
         section_label.setBuddy(self.section_filter)
         self.section_filter.setMinimumWidth(150)
         filters.addWidget(self.section_filter)
@@ -532,16 +532,7 @@ class ComparadorTempoPage(QWidget):
         filters.addWidget(self.reset_filters_button)
         preview_layout.addLayout(filters)
         tolerance_label = QLabel("&Tolerancia (solo vista):")
-        self.tolerance_filter = QSpinBox()
-        self.tolerance_filter.setObjectName("reviewTolerance")
-        self.tolerance_filter.setRange(0, 999999)
-        self.tolerance_filter.setSuffix(" min")
-        self.tolerance_filter.setSpecialValueText("Sin filtro")
-        self.tolerance_filter.setKeyboardTracking(False)
-        self.tolerance_filter.setButtonSymbols(QAbstractSpinBox.NoButtons)
-        self.tolerance_filter.setMinimumWidth(120)
-        self.tolerance_filter.setAccessibleName("Tolerancia de diferencias en minutos, solo para la vista")
-        self.tolerance_filter.setToolTip("Con 5 minutos se ocultan filas cuyas únicas diferencias son de −5 a +5 minutos, inclusive. Se conservan avisos rojos, fichajes pendientes y personas ausentes en un origen. No cambia los Excel ni la exportación completa.")
+        self.tolerance_filter = DurationFilter()
         tolerance_label.setBuddy(self.tolerance_filter)
         self.tolerance_filter.valueChanged.connect(self._refresh_preview)
         self.active_filters = ElidedLabel()
@@ -719,7 +710,7 @@ class ComparadorTempoPage(QWidget):
         self.tolerance_filter.setValue(0)
         self._reset_sort()
         self.section_filter.blockSignals(True)
-        self.section_filter.clear()
+        self.section_filter.set_options([])
         self.section_filter.blockSignals(False)
         self.worker_search.clear()
         self.reason_filter.setCurrentIndex(0)
@@ -1079,12 +1070,12 @@ class ComparadorTempoPage(QWidget):
         elapsed = int(result.elapsed_seconds)
         self.result_summary_label.setText(f"Completada · {elapsed // 60:02d}:{elapsed % 60:02d}")
         self.section_filter.blockSignals(True)
-        self.section_filter.clear()
-        self.section_filter.addItem("Todas las secciones")
+        section_options = []
         for section in sorted(set(result.sections) | set(result.section_counts), key=lambda value: (not bool(value), search_key(value))):
-            self.section_filter.addItem(section or "Sin sección verificable", section)
+            section_options.append((section or "Sin sección verificable", section))
         if any(row.missing_source for row in result.rows):
-            self.section_filter.addItem("Solo en un origen", "__missing__")
+            section_options.append(("Solo en un origen", "__missing__"))
+        self.section_filter.set_options(section_options)
         self.section_filter.blockSignals(False)
         self.reason_filter.blockSignals(True)
         self.reason_filter.setCurrentIndex(0)
@@ -1132,9 +1123,9 @@ class ComparadorTempoPage(QWidget):
             self.preview_table.setRowCount(0)
             self.preview_count.setText("Sin resultados")
             return
-        selection = self.section_filter.currentData()
-        rows = [row for row in result.rows if selection is None
-                or (bool(row.missing_source) if selection == "__missing__" else row.section == selection)]
+        selection = self.section_filter.selected_values()
+        rows = [row for row in result.rows if not selection or row.section in selection
+                or ("__missing__" in selection and bool(row.missing_source))]
         section_rows = rows
         rows = [row for row in rows if matches_reason(row, self.reason_filter.currentData())]
         rows = [row for row in rows if matches_incidence(row, self.incidence_filter.currentData())]
@@ -1208,27 +1199,30 @@ class ComparadorTempoPage(QWidget):
             self.preview_table.setCurrentCell(selected, max(0, self.preview_table.currentColumn()))
             self._preview_selection_changed()
         else:
-            self._close_worker_detail()
+            self._close_worker_detail(restore_focus=False)
         self.empty_preview_label.setVisible(not rows)
         self.empty_preview_label.setText("Ningún trabajador coincide con estos filtros. Pulsa «Quitar filtros» para ver el resultado completo." if result.rows else "La comparación no ha incluido trabajadores para revisar. Consulta la auditoría para comprobar posibles avisos de los datos de origen.")
-        self.reset_filters_button.setEnabled(selection is not None or bool(needle) or bool(self.reason_filter.currentData()) or self.incidence_filter.currentData() is not None or self.tolerance_filter.value() > 0)
-        counts = result.section_counts.get(selection)
+        self.reset_filters_button.setEnabled(bool(selection) or bool(needle) or bool(self.reason_filter.currentData()) or self.incidence_filter.currentData() is not None or self.tolerance_filter.value() > 0)
         self.source_count.setToolTip(self.preview_count.toolTip())
         count_text = f"Vista: {len(rows)} de {len(section_rows)}"
         source_text = ""
-        if counts is not None:
-            source_text = f"Orígenes de {selection}: Partes Mensuales: {counts['pm']} · Tempo: {counts['tempo']}"
-        elif selection is None and result.section_counts:
+        if selection and "__missing__" not in selection and all(s in result.section_counts for s in selection):
+            source_text = (f"Partes Mensuales: {sum(result.section_counts[s]['pm'] for s in selection)}"
+                           f" · Tempo: {sum(result.section_counts[s]['tempo'] for s in selection)}")
+            self.source_count.setToolTip(self.preview_count.toolTip() + "\nSecciones: " + self.section_filter.selection_text())
+        elif not selection and result.section_counts:
             only_tempo = sum(row.missing_source == "Partes Mensuales" for row in result.rows)
             source_text = f"Por sección: PM {sum(c['pm'] for c in result.section_counts.values())} · Tempo vinculado {sum(c['tempo'] for c in result.section_counts.values())}"
             self.source_count.setToolTip(self.preview_count.toolTip() + f"\nTrabajadores solo en Tempo: {only_tempo}.")
-        elif selection != "__missing__":
+        elif "__missing__" in selection:
+            source_text = "Selección incluye trabajadores solo en un origen"
+        else:
             source_text = "Recuentos de origen no disponibles"
         self.preview_count.setText(count_text)
         self.source_count.setText(source_text)
         active = []
-        if selection is not None:
-            active.append("Sección: " + self.section_filter.currentText())
+        if selection:
+            active.append("Secciones: " + self.section_filter.selection_text())
         if self.reason_filter.currentData():
             active.append(self.reason_filter.currentText())
         if self.incidence_filter.currentData() is not None:
@@ -1243,7 +1237,7 @@ class ComparadorTempoPage(QWidget):
     def _reset_preview_filters(self) -> None:
         for control in (self.section_filter, self.reason_filter, self.incidence_filter, self.worker_search, self.tolerance_filter):
             control.blockSignals(True)
-        self.section_filter.setCurrentIndex(0)
+        self.section_filter.set_selected(set())
         self.reason_filter.setCurrentIndex(0)
         self.incidence_filter.setCurrentIndex(0)
         self.worker_search.clear()
@@ -1407,12 +1401,15 @@ class ComparadorTempoPage(QWidget):
         self._dialog_detail_panel = None
         self.preview_table.setFocus()
 
-    def _close_worker_detail(self) -> None:
+    def _close_worker_detail(self, *, restore_focus: bool = True) -> None:
+        focused = QApplication.focusWidget()
         if self._detail_dialog is not None:
             self._detail_dialog.close()
         self.worker_detail.hide()
-        if self.state_stack.currentWidget() is self.result_state:
+        if restore_focus and self.state_stack.currentWidget() is self.result_state:
             self.preview_table.setFocus()
+        elif not restore_focus and focused is not None and focused.isVisible():
+            focused.setFocus()
 
     @staticmethod
     def _format_minutes(minutes: int | None) -> str:

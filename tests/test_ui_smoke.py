@@ -98,9 +98,9 @@ class UiSmokeTests(unittest.TestCase):
             self.assertEqual(page.preview_table.item(0, 7).text(), "0:00")
             self.assertEqual(page.preview_table.item(0, 9).text(), "+0:25")
             self.assertEqual(page.preview_table.item(0, 9).background().color().name(), "#fff4cc")
-            page.section_filter.setCurrentText("ML")
+            page.section_filter.set_selected({"ML"})
             self.assertIn("Partes Mensuales: 3 · Tempo: 2", page.source_count.text())
-            page.section_filter.setCurrentText("Solo en un origen")
+            page.section_filter.set_selected({"__missing__"})
             self.assertEqual(page.preview_table.rowCount(), 1)
             for column in range(3, 12):
                 self.assertEqual(page.preview_table.item(0, column).text(), "—")

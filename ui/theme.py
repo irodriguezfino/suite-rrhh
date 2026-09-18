@@ -195,8 +195,9 @@ def apply_application_style(app) -> None:
         QToolButton[reviewMenuButton="true"]:disabled {{ color: #7A8495; background: #EEF1F5; border-color: #E2E6EC; }}
         QToolButton[reviewMenuButton="true"]:focus {{ border: 2px solid {COLORS['focus']}; }}
         QToolButton[reviewMenuButton="true"]::menu-indicator {{ image: url("{calendar_chevron}"); width: 12px; height: 12px; subcontrol-position: right center; right: 7px; }}
-        QSpinBox#reviewTolerance {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 7px; padding: 4px 5px; min-height: 22px; }}
-        QSpinBox#reviewTolerance:focus {{ border: 2px solid {COLORS['focus']}; }}
+        QLineEdit#reviewTolerance {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 7px; padding: 4px 5px; min-height: 22px; }}
+        QLineEdit#reviewTolerance:focus {{ border: 2px solid {COLORS['focus']}; }}
+        QLineEdit#reviewTolerance[invalid="true"] {{ border: 2px solid #B42318; }}
         QLabel#legendNegative, QLabel#legendPositive, QLabel#legendReview {{ border-radius: 5px; padding: 5px 8px; font-size: 10pt; }}
         QLabel#legendNegative {{ background: #E2F0D9; color: #215E21; }}
         QLabel#legendPositive {{ background: #FFF4CC; color: #7A4C00; }}
