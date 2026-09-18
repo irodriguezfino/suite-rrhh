@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
             action.setChecked(self.stack.currentWidget() is page)
 
     def _show_news(self) -> None:
-        QMessageBox.information(self, "Novedades · v1.0.22", "• Control = Trab. Real de Tempo − RUIDO de Partes Mensuales.\n• Inicio con tarjetas verticales, distribución adaptable y guías directas.\n• Exportación e importación de comparaciones completas (.rrhh).\n• Consulta con filtros y detalles sin los Excel originales.\n\nLas comparaciones importadas conservan sus resultados y explicaciones originales: no se recalculan ni se editan. Para nuevas comparaciones, exporta Tempo con la columna Trab. Real.")
+        QMessageBox.information(self, f"Novedades · v{APP_VERSION}", "• El botón Compartir ahora tiene borde, fondo y flecha visibles, como Vista.\n• Foco de teclado visible y ayuda al pasar el cursor.\n• Compartir → Exportar comparación completa guarda el archivo .rrhh.\n\nSe mantienen el cálculo de Control con Trab. Real, el menú vertical y la importación/exportación de resultados completos, sin recalcular los archivos recibidos.")
 
     def show_help(self) -> None:
         if self.stack.currentWidget() is self.fase1_page:

@@ -12,7 +12,7 @@ from unittest.mock import patch
 import zipfile
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import QSettings, Qt, QMimeData, QUrl, QPoint, QPointF
+from PySide6.QtCore import QSettings, Qt, QMimeData, QUrl, QPoint, QPointF, QTimer
 from PySide6.QtGui import QFontDatabase, QDragEnterEvent, QDropEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -230,6 +230,30 @@ class SharingUITests(unittest.TestCase):
         with patch.object(self.page,'_import_comparison') as receive:
             self.page.dropEvent(drop)
             receive.assert_called_once_with(invalid)
+
+    def test_share_button_matches_view_button_and_opens_with_mouse_and_keyboard(self):
+        self.page._on_success(fixture(self.root))
+        self.app.processEvents()
+        button = self.page.share_button
+        self.assertTrue(button.property('reviewMenuButton'))
+        self.assertTrue(self.page.view_options.property('reviewMenuButton'))
+        self.assertEqual(button.height(), self.page.view_options.height())
+        self.assertGreaterEqual(button.height(), 35)
+        self.assertEqual([a.text() for a in button.menu().actions()],
+                         ['Exportar comparación completa…', 'Importar comparación…'])
+        for keyboard in (False, True):
+            shown = []
+            def close_menu():
+                shown.append(button.menu().isVisible())
+                button.menu().close()
+            button.setFocus()
+            QTimer.singleShot(50, close_menu)
+            if keyboard:
+                QTest.keyClick(button, Qt.Key_Space)
+            else:
+                QTest.mouseClick(button, Qt.LeftButton)
+            QTest.qWait(80)
+            self.assertEqual(shown, [True])
 
     def test_home_navigation_and_manual_update_cleanup(self):
         from ui.main_window import MainWindow

@@ -189,10 +189,12 @@ def apply_application_style(app) -> None:
         QToolButton#reviewCompactHelp {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 5px; padding: 4px 8px; }}
         QToolButton#reviewCompactHelp:hover {{ background: {COLORS['info_surface']}; }}
         QToolButton#reviewCompactHelp:focus {{ border: 2px solid {COLORS['focus']}; }}
-        QToolButton#reviewViewOptions {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 6px; padding: 9px 25px 9px 12px; }}
-        QToolButton#reviewViewOptions:hover {{ background: {COLORS['info_surface']}; }}
-        QToolButton#reviewViewOptions:focus {{ border: 2px solid {COLORS['focus']}; }}
-        QToolButton#reviewViewOptions::menu-indicator {{ image: url("{calendar_chevron}"); width: 12px; height: 12px; subcontrol-position: right center; right: 7px; }}
+        QToolButton[reviewMenuButton="true"] {{ background: {COLORS['surface']}; border: 1px solid {COLORS['border']}; border-radius: 6px; padding: 9px 25px 9px 12px; }}
+        QToolButton[reviewMenuButton="true"]:hover {{ background: {COLORS['info_surface']}; }}
+        QToolButton[reviewMenuButton="true"]:pressed {{ background: #E5ECF8; }}
+        QToolButton[reviewMenuButton="true"]:disabled {{ color: #7A8495; background: #EEF1F5; border-color: #E2E6EC; }}
+        QToolButton[reviewMenuButton="true"]:focus {{ border: 2px solid {COLORS['focus']}; }}
+        QToolButton[reviewMenuButton="true"]::menu-indicator {{ image: url("{calendar_chevron}"); width: 12px; height: 12px; subcontrol-position: right center; right: 7px; }}
         QLabel#legendNegative, QLabel#legendPositive, QLabel#legendReview {{ border-radius: 5px; padding: 5px 8px; font-size: 10pt; }}
         QLabel#legendNegative {{ background: #E2F0D9; color: #215E21; }}
         QLabel#legendPositive {{ background: #FFF4CC; color: #7A4C00; }}
