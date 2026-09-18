@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
             action.setChecked(self.stack.currentWidget() is page)
 
     def _show_news(self) -> None:
-        QMessageBox.information(self, f"Novedades · v{APP_VERSION}", "• El botón Compartir ahora tiene borde, fondo y flecha visibles, como Vista.\n• Foco de teclado visible y ayuda al pasar el cursor.\n• Compartir → Exportar comparación completa guarda el archivo .rrhh.\n\nSe mantienen el cálculo de Control con Trab. Real, el menú vertical y la importación/exportación de resultados completos, sin recalcular los archivos recibidos.")
+        QMessageBox.information(self, f"Novedades · v{APP_VERSION}", "• Pulsa las cabeceras del informe para ordenar de menor a mayor y viceversa.\n• Introduce una tolerancia en minutos para filtrar diferencias pequeñas en la vista.\n• Los avisos rojos, fichajes pendientes y trabajadores sin correspondencia conservan su revisión.\n• Vista permite recuperar el orden por sección y apellidos; Quitar filtros elimina la tolerancia.\n\nNo se alteran cálculos ni informes guardados. Compartir sigue exportando la comparación completa, aunque haya filtros activos.")
 
     def show_help(self) -> None:
         if self.stack.currentWidget() is self.fase1_page:

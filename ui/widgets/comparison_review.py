@@ -49,6 +49,61 @@ def review_order(row: ComparatorRow) -> tuple:
     return (not bool(row.section), search_key(row.section), search_key(row.worker), row.sap_code)
 
 
+def review_column_value(row: ComparatorRow, column: int):
+    """Sort by source minutes, never the formatted hour strings; dashes are null."""
+    if column == 0:
+        return (0, int(row.sap_code)) if row.sap_code.isdecimal() else (1, search_key(row.sap_code))
+    if column == 1:
+        return search_key(row.worker)
+    if column == 2:
+        return search_key('; '.join(row.incidence_messages)) if row.incidence_messages else None
+    if column == len(TIME_COLUMNS) + 5:
+        return search_key(row.section) if row.section else None
+    if row.missing_source:
+        return None
+    if column == 3:
+        return row.sap_daily_work_minutes
+    field = 'Control' if column == 4 else TIME_COLUMNS[column - 5]
+    if field in row.suppressed_fields or (field == 'ABSENT' and field not in row.red_fields):
+        return None
+    return row.sap_daily_minus_noise_minutes if field == 'Control' else row.values_minutes.get(field)
+
+
+def sorted_review_rows(rows, column: int | None = None, descending: bool = False):
+    """Stable ties by section/surname; missing values last in both directions."""
+    ordered = sorted(rows, key=review_order)
+    if column is None:
+        return ordered
+    present, absent = [], []
+    for row in ordered:
+        value = review_column_value(row, column)
+        if value is None:
+            absent.append(row)
+        else:
+            present.append((value, row))
+    return [row for _, row in sorted(present, key=lambda item: item[0], reverse=descending)] + absent
+
+
+def matches_tolerance(row: ComparatorRow, minutes: int, reason: str | None = None) -> bool:
+    """View-only narrowing of the stored result; never recalculate or erase alerts."""
+    if minutes <= 0:
+        return True
+    if reason in TIME_COLUMNS or reason == 'Control':
+        if reason in row.red_fields:
+            return True
+        value = row.sap_daily_minus_noise_minutes if reason == 'Control' else row.values_minutes.get(reason)
+        return reason in row.trigger_fields and value is not None and abs(value) > minutes
+    if (row.red_fields or row.missing_source
+            or any(message in MISSING_MARKING_MESSAGES for message in row.incidence_messages)
+            or 'Sección pendiente de verificar' in row.incidence_messages):
+        return True
+    for field in row.trigger_fields:
+        value = row.sap_daily_minus_noise_minutes if field == 'Control' else row.values_minutes.get(field)
+        if value is not None and abs(value) > minutes:
+            return True
+    return False
+
+
 def matches_reason(row: ComparatorRow, reason: str | None) -> bool:
     if not reason:
         return True
@@ -201,7 +256,7 @@ class FrozenIdentityTable(QTableWidget):
         self.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.horizontalHeader().setMinimumSectionSize(80)
         self.horizontalHeader().setSectionsMovable(False)
-        self.horizontalHeader().setSectionsClickable(False)
+        self.horizontalHeader().setSectionsClickable(True)
         self.horizontalHeader().moveSection(len(columns) - 1, 0)
         self.setItemDelegate(DifferenceDelegate(self))
         self.frozen = QTableView(self)
@@ -218,7 +273,7 @@ class FrozenIdentityTable(QTableWidget):
         self.frozen.setTextElideMode(Qt.ElideRight)
         self.frozen.verticalHeader().hide()
         self.frozen.verticalHeader().setDefaultSectionSize(36)
-        self.frozen.horizontalHeader().setSectionsClickable(False)
+        self.frozen.horizontalHeader().setSectionsClickable(True)
         self.frozen.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.frozen.horizontalHeader().setMinimumSectionSize(80)
         self.frozen.horizontalHeader().moveSection(len(columns) - 1, 0)

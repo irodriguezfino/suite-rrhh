@@ -15,9 +15,9 @@ from pathlib import Path
 from PySide6.QtCore import QElapsedTimer, QProcess, QSettings, QStandardPaths, QTimer, Qt, Signal, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication, QBoxLayout, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QMenu, QToolButton,
+    QAbstractSpinBox, QApplication, QBoxLayout, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QMenu, QToolButton,
     QLabel, QLineEdit, QMessageBox, QPushButton, QProgressBar, QProgressDialog,
-    QSizePolicy, QSplitter, QStackedWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QSizePolicy, QSpinBox, QSplitter, QStackedWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from core.models import ComparatorRequest, ComparatorResult, ComparatorRow, ProgressUpdate
@@ -31,7 +31,7 @@ from ui.dialogs.details_dialog import DetailsDialog
 from ui.dialogs.error_dialog import ErrorDialog
 from ui.widgets.comparison_review import (
     ElidedLabel, FrozenIdentityTable, WorkerDetailPanel, calculation_text,
-    matches_reason, matches_incidence, incidence_keys, review_order, search_key, duration, comparison_triplet,
+    matches_reason, matches_incidence, matches_tolerance, sorted_review_rows, incidence_keys, search_key, duration, comparison_triplet,
 )
 
 
@@ -55,6 +55,8 @@ class ComparadorTempoPage(QWidget):
         self._imported_archive = None
         self.setAcceptDrops(True)
         self._preview_rows: list[ComparatorRow] = []
+        self._sort_column: int | None = None
+        self._sort_descending = False
         self._detail_dialog: QDialog | None = None
         self._dialog_detail_panel: WorkerDetailPanel | None = None
         self._detail_width = 560
@@ -444,6 +446,14 @@ class ComparadorTempoPage(QWidget):
         self.accessible_action.toggled.connect(self._set_accessible_view)
         view_menu.addSeparator()
         view_menu.addAction("Restablecer anchos", lambda: self.preview_table.reset_column_widths())
+        sorting_menu = view_menu.addMenu("Ordenar por")
+        for column, title in enumerate((*RESULT_COLUMNS, "Sección")):
+            action = sorting_menu.addAction(title)
+            action.triggered.connect(lambda checked=False, col=column: self._sort_preview(col))
+        self.descending_action = view_menu.addAction("Orden descendente")
+        self.descending_action.setCheckable(True)
+        self.descending_action.toggled.connect(self._set_sort_direction)
+        view_menu.addAction("Restablecer orden: sección y apellidos", self._reset_sort)
         self.view_options.setMenu(view_menu)
         self.sources_action = view_menu.addAction("Mostrar archivos de origen")
         self.sources_action.setCheckable(True)
@@ -493,7 +503,7 @@ class ComparadorTempoPage(QWidget):
         filters.addWidget(reason_label)
         self.reason_filter = QComboBox()
         self.reason_filter.setAccessibleName("Filtrar por motivo de revisión")
-        self.reason_filter.setToolTip("Filtra por el motivo que requiere revisión según las reglas actuales. Las diferencias ordinarias deben superar un minuto; los controles rojos y fichajes siguen sus reglas especiales. No modifica el informe guardado.")
+        self.reason_filter.setToolTip("Combina el motivo con la tolerancia de la vista. Los controles rojos y fichajes siguen sus reglas especiales. No modifica el informe guardado.")
         reason_label.setBuddy(self.reason_filter)
         for title, value in (("Todos los motivos", ""), ("Control: requiere revisión", "Control"),
                              ("Falta de fichaje", "marking"), ("Revisión especial · rojo", "red"),
@@ -521,12 +531,27 @@ class ComparadorTempoPage(QWidget):
         self.reset_filters_button.clicked.connect(self._reset_preview_filters)
         filters.addWidget(self.reset_filters_button)
         preview_layout.addLayout(filters)
+        tolerance_label = QLabel("&Tolerancia (solo vista):")
+        self.tolerance_filter = QSpinBox()
+        self.tolerance_filter.setObjectName("reviewTolerance")
+        self.tolerance_filter.setRange(0, 999999)
+        self.tolerance_filter.setSuffix(" min")
+        self.tolerance_filter.setSpecialValueText("Sin filtro")
+        self.tolerance_filter.setKeyboardTracking(False)
+        self.tolerance_filter.setButtonSymbols(QAbstractSpinBox.NoButtons)
+        self.tolerance_filter.setMinimumWidth(120)
+        self.tolerance_filter.setAccessibleName("Tolerancia de diferencias en minutos, solo para la vista")
+        self.tolerance_filter.setToolTip("Con 5 minutos se ocultan filas cuyas únicas diferencias son de −5 a +5 minutos, inclusive. Se conservan avisos rojos, fichajes pendientes y personas ausentes en un origen. No cambia los Excel ni la exportación completa.")
+        tolerance_label.setBuddy(self.tolerance_filter)
+        self.tolerance_filter.valueChanged.connect(self._refresh_preview)
         self.active_filters = ElidedLabel()
         self.active_filters.setObjectName("activeFilters")
         self.active_filters.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.active_filters.hide()
         preview_layout.addWidget(self.active_filters)
         self.counts_layout = QHBoxLayout()
+        self.counts_layout.addWidget(tolerance_label)
+        self.counts_layout.addWidget(self.tolerance_filter)
         self.preview_count = QLabel("Sin resultados")
         self.preview_count.setObjectName("mutedLabel")
         self.preview_count.setWordWrap(True)
@@ -562,7 +587,10 @@ class ComparadorTempoPage(QWidget):
         self.review_splitter.setChildrenCollapsible(False)
         self.preview_table = FrozenIdentityTable((*RESULT_COLUMNS, "Sección"))
         self.preview_table.setAccessibleName("Vista previa de trabajadores a revisar")
-        self.preview_table.setToolTip("Orden fijo: sección y apellidos. Selecciona una fila y pulsa Intro para ver su detalle.")
+        self.preview_table.setToolTip("Pulsa una cabecera para ordenar; vuelve a pulsarla para invertir el orden. Las horas se ordenan por su valor con signo. Intro abre el detalle. También puedes ordenar desde Vista.")
+        for header in (self.preview_table.horizontalHeader(), self.preview_table.frozen.horizontalHeader()):
+            header.sectionClicked.connect(self._sort_preview)
+            header.setSortIndicatorShown(False)
         self.preview_table.setMinimumHeight(210)
         self.preview_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.review_splitter.addWidget(self.preview_table)
@@ -606,9 +634,11 @@ class ComparadorTempoPage(QWidget):
         self.new_comparison_button.setToolTip("Volver al inicio del comparador y limpiar archivos y filtros. No elimina los informes guardados ni las carpetas recordadas.")
         actions.addWidget(self.new_comparison_button)
         actions.addStretch(1)
-        order = QLabel("Orden fijo: sección → apellidos")
-        order.setObjectName("mutedLabel")
-        actions.addWidget(order)
+        self.order_label = ElidedLabel()
+        self.order_label.setText("Sección → apellidos")
+        self.order_label.setObjectName("mutedLabel")
+        self.order_label.setMinimumWidth(180)
+        actions.addWidget(self.order_label)
         preview_layout.addLayout(actions)
         layout.addWidget(self.preview_group, 1)
         return state
@@ -686,6 +716,8 @@ class ComparadorTempoPage(QWidget):
         self._preview_rows = []
         self.detail_button.setEnabled(False)
         self._last_result = None
+        self.tolerance_filter.setValue(0)
+        self._reset_sort()
         self.section_filter.blockSignals(True)
         self.section_filter.clear()
         self.section_filter.blockSignals(False)
@@ -1031,6 +1063,12 @@ class ComparadorTempoPage(QWidget):
         self._search_cache = {id(row): search_key(" ".join((row.worker, row.sap_code, *row.incidence_messages))) for row in result.rows}
         self._close_worker_detail()
         self._last_result = result
+        self.tolerance_filter.blockSignals(True)
+        self.tolerance_filter.setValue(0)
+        self.tolerance_filter.blockSignals(False)
+        self._sort_column = None
+        self._sort_descending = False
+        self._update_sort_indicator()
         if self._imported_archive is None:
             self._remember_directory("output", result.output_path.parent)
         self._details.extend(result.detail_lines)
@@ -1100,13 +1138,14 @@ class ComparadorTempoPage(QWidget):
         section_rows = rows
         rows = [row for row in rows if matches_reason(row, self.reason_filter.currentData())]
         rows = [row for row in rows if matches_incidence(row, self.incidence_filter.currentData())]
+        rows = [row for row in rows if matches_tolerance(row, self.tolerance_filter.value(), self.reason_filter.currentData())]
         needle = search_key(self.worker_search.text().strip()).split()
         if needle:
             rows = [
                 row for row in rows
                 if all(word in self._search_cache.get(id(row), "") for word in needle)
             ]
-        rows = sorted(rows, key=review_order)
+        rows = sorted_review_rows(rows, self._sort_column, self._sort_descending)
         previous = self.preview_table.currentRow()
         identity = None
         if 0 <= previous < len(self._preview_rows):
@@ -1172,7 +1211,7 @@ class ComparadorTempoPage(QWidget):
             self._close_worker_detail()
         self.empty_preview_label.setVisible(not rows)
         self.empty_preview_label.setText("Ningún trabajador coincide con estos filtros. Pulsa «Quitar filtros» para ver el resultado completo." if result.rows else "La comparación no ha incluido trabajadores para revisar. Consulta la auditoría para comprobar posibles avisos de los datos de origen.")
-        self.reset_filters_button.setEnabled(selection is not None or bool(needle) or bool(self.reason_filter.currentData()) or self.incidence_filter.currentData() is not None)
+        self.reset_filters_button.setEnabled(selection is not None or bool(needle) or bool(self.reason_filter.currentData()) or self.incidence_filter.currentData() is not None or self.tolerance_filter.value() > 0)
         counts = result.section_counts.get(selection)
         self.source_count.setToolTip(self.preview_count.toolTip())
         count_text = f"Vista: {len(rows)} de {len(section_rows)}"
@@ -1196,20 +1235,55 @@ class ComparadorTempoPage(QWidget):
             active.append("Incidencia: " + self.incidence_filter.currentText())
         if needle:
             active.append("Búsqueda: " + self.worker_search.text().strip())
+        if self.tolerance_filter.value():
+            active.append(f"Diferencias mayores de {self.tolerance_filter.value()} min · avisos especiales conservados")
         self.active_filters.setText("Filtros activos · " + " · ".join(active))
         self.active_filters.setVisible(bool(active))
 
     def _reset_preview_filters(self) -> None:
-        for control in (self.section_filter, self.reason_filter, self.incidence_filter, self.worker_search):
+        for control in (self.section_filter, self.reason_filter, self.incidence_filter, self.worker_search, self.tolerance_filter):
             control.blockSignals(True)
         self.section_filter.setCurrentIndex(0)
         self.reason_filter.setCurrentIndex(0)
         self.incidence_filter.setCurrentIndex(0)
         self.worker_search.clear()
-        for control in (self.section_filter, self.reason_filter, self.incidence_filter, self.worker_search):
+        self.tolerance_filter.setValue(0)
+        for control in (self.section_filter, self.reason_filter, self.incidence_filter, self.worker_search, self.tolerance_filter):
             control.blockSignals(False)
         self._refresh_preview()
         self.worker_search.setFocus()
+
+    def _sort_preview(self, column: int) -> None:
+        self._sort_descending = not self._sort_descending if self._sort_column == column else False
+        self._sort_column = column
+        self._update_sort_indicator()
+        self._refresh_preview()
+
+    def _set_sort_direction(self, descending: bool) -> None:
+        if self._sort_column is None:
+            self._sort_column = 1
+        self._sort_descending = descending
+        self._update_sort_indicator()
+        self._refresh_preview()
+
+    def _reset_sort(self) -> None:
+        self._sort_column = None
+        self._sort_descending = False
+        self._update_sort_indicator()
+        self._refresh_preview()
+
+    def _update_sort_indicator(self) -> None:
+        for header in (self.preview_table.horizontalHeader(), self.preview_table.frozen.horizontalHeader()):
+            header.setSortIndicatorShown(self._sort_column is not None)
+            if self._sort_column is not None:
+                header.setSortIndicator(self._sort_column, Qt.DescendingOrder if self._sort_descending else Qt.AscendingOrder)
+        self.descending_action.blockSignals(True)
+        self.descending_action.setChecked(self._sort_descending)
+        self.descending_action.blockSignals(False)
+        title = "Sección → apellidos" if self._sort_column is None else (
+            f"{self.preview_table.horizontalHeaderItem(self._sort_column).text()} "
+            + ("↓ descendente" if self._sort_descending else "↑ ascendente"))
+        self.order_label.setText(title)
 
     def _selected_review_row(self) -> ComparatorRow | None:
         index = self.preview_table.currentRow()
@@ -1217,7 +1291,7 @@ class ComparadorTempoPage(QWidget):
 
     def _set_review_tab_order(self) -> None:
         controls = (self.result_back_button, self.paths_button, self.view_options, self.share_button, self.section_filter, self.worker_search,
-                    self.reason_filter, self.incidence_filter, self.reset_filters_button, self.legend_help,
+                    self.reason_filter, self.incidence_filter, self.reset_filters_button, self.tolerance_filter, self.legend_help,
                     self.preview_table, self.detail_button, self.worker_detail.expand_button, self.worker_detail.close_button,
                     self.worker_detail.previous_button, self.worker_detail.next_button,
                     self.worker_detail.all_fields, self.worker_detail.browser,

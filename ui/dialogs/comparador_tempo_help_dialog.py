@@ -129,13 +129,26 @@ class ComparadorTempoHelpDialog(QDialog):
             layout.addLayout(steps)
             layout.addWidget(self._callout(
                 "Revisa sin salir de la aplicación",
-                "La vista previa mantiene siempre el orden por sección y apellidos. Sección, código y trabajador permanecen fijos "
+                "La vista previa empieza ordenada por sección y apellidos. Pulsa una cabecera para ordenar de menor a mayor; "
+                "pulsa otra vez para invertir el orden. Las horas se ordenan numéricamente con su signo y los guiones quedan al final. "
+                "También puedes ordenar desde Vista y restablecer el orden por sección y apellidos. Sección, código y trabajador permanecen fijos "
                 "al desplazarte horizontalmente; puedes ajustar sus anchos. Combina sección, búsqueda por nombre o código (Ctrl+F) "
                 "y motivo de revisión. Revisar ABSENT incluye también los absentismos en rojo cuya diferencia es cero. "
                 "El filtro Incidencia ofrece los tipos presentes en el resultado completo y Sin incidencias cuando corresponda; "
                 "si alguien tiene varias, podrás encontrarlo por cualquiera de ellas. Todos los filtros se combinan. "
                 "El resumen de filtros activos explica qué estás viendo; Quitar filtros recupera todas las filas. "
                 "Los recuentos de origen no cambian al buscar. Los filtros solo cambian la vista: no modifican el Excel completo ni sus cálculos.",
+            ))
+            layout.addWidget(self._callout(
+                "Tolerancia: centra la revisión en las diferencias mayores",
+                "Introduce minutos en Tolerancia y confirma con Intro o sal del campo. Con 5 min, una diferencia de +5 o −5 "
+                "queda dentro del margen; +6 o −6 sigue requiriendo revisión. Sin filtro (0) muestra el resultado original. "
+                "La fila se oculta solo si ninguna diferencia relevante supera el margen y no tiene avisos especiales. "
+                "Si filtras un motivo concreto, el margen se aplica a ese campo. Los controles rojos (incluido ABSENT), "
+                "fichajes pendientes, trabajadores sin correspondencia y secciones pendientes de verificar se conservan. "
+                "Las filas visibles mantienen sus cifras y colores originales, incluso en campos dentro del margen. "
+                "Quitar filtros restaura la tolerancia a cero. No aparecen trabajadores descartados al crear el informe "
+                "con su margen original de un minuto. El Excel y la exportación .rrhh siempre conservan la comparación completa.",
             ))
             layout.addWidget(self._callout(
                 "Comparte la revisión sin los archivos originales",
