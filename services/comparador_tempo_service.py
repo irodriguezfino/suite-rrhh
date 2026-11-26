@@ -617,7 +617,10 @@ class ComparadorTempoService:
         rows: Iterable[dict[int, object]],
     ) -> tuple[dict[str, dict], set[str]]:
         headers: dict[str, int] | None = None
-        missing_real_header = False
+        required = {field: _normalise_header(field) for field in SAP_COLUMNS}
+        missing_headers = list(SAP_COLUMNS)
+        legacy_he30 = _normalise_header("1166-HE30%")
+        current_he30 = _normalise_header("1130-HE30%")
         mark_columns: tuple[int, int] | None = None
         totals: dict[str, dict] = {}
         duplicate_codes: set[str] = set()
@@ -629,12 +632,14 @@ class ComparadorTempoService:
                 continue
             if headers is None:
                 by_header = {_normalise_header(value): column for column, value in values.items()}
-                required = {_normalise_header(value) for value in SAP_COLUMNS}
-                real_header = _normalise_header(CONTROL_SOURCE_FIELD)
-                if (required - {real_header}).issubset(by_header) and real_header not in by_header:
-                    missing_real_header = True
-                if required.issubset(by_header):
-                    headers = {value: by_header[_normalise_header(value)] for value in SAP_COLUMNS}
+                if current_he30 in by_header:
+                    # Conserva la clave interna de los informes generados por la Suite.
+                    by_header.setdefault(legacy_he30, by_header[current_he30])
+                row_missing = [field for field, header in required.items() if header not in by_header]
+                if len(row_missing) < len(missing_headers):
+                    missing_headers = row_missing
+                if not row_missing:
+                    headers = {field: by_header[header] for field, header in required.items()}
                     marks = [column for column, value in values.items() if _normalise_header(value) == "MARCAJES"]
                     if len(marks) < 2:
                         raise ValueError("No se localizaron las dos columnas de marcajes del Excel Tempo.")
@@ -677,14 +682,18 @@ class ComparadorTempoService:
                 if message and message not in marking_incidents[current_worker[0]]:
                     marking_incidents[current_worker[0]].append(message)
         if headers is None:
-            if missing_real_header:
+            if missing_headers == [CONTROL_SOURCE_FIELD]:
                 raise ValueError(
                     "No se localizaron las columnas Tempo necesarias: falta Trab. Real. "
                     "Exporta de nuevo el informe de Tempo incluyendo esa columna. "
                     "Control requiere Trab. Real y no se sustituye por Trab. Dia."
                 )
-            expected = ", ".join(SAP_COLUMNS)
-            raise ValueError(f"No se localizaron las columnas Tempo necesarias: {expected}.")
+            missing = ", ".join(
+                "1166-HE30% o 1130-HE30%" if field == "1166-HE30%" else field
+                for field in missing_headers
+            )
+            verb = "falta" if len(missing_headers) == 1 else "faltan"
+            raise ValueError(f"No se localizaron las columnas Tempo necesarias: {verb} {missing}.")
         if not totals:
             raise ValueError("No se localizaron los totales por trabajador en el Excel Tempo.")
         return totals, duplicate_codes

@@ -75,6 +75,22 @@ class ComparadorTempoServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "falta Trab. Real"):
             ComparadorTempoService._read_sap_totals_from_rows([old_headers])
 
+    def test_he30_accepts_both_export_headers_under_the_existing_report_key(self):
+        fields = {i: field for i, field in enumerate(SAP_COLUMNS, 5)}
+        he30_column = next(i for i, field in fields.items() if field == "1166-HE30%")
+        for spelling in ("1166-HE30%", "1130-HE30%"):
+            with self.subTest(spelling=spelling):
+                headers = {**fields, 3: "Marcajes", 4: "Marcajes", he30_column: spelling}
+                worker = {2: "1001 PERSONA PRUEBA"}
+                parsed, _ = ComparadorTempoService._read_sap_totals_from_rows(
+                    [headers, worker, worker, {he30_column: "1:30"}]
+                )
+                self.assertEqual(parsed["1001"]["values"]["1166-HE30%"], 90)
+
+        del headers[he30_column]
+        with self.assertRaisesRegex(ValueError, r"falta 1166-HE30% o 1130-HE30%\.$"):
+            ComparadorTempoService._read_sap_totals_from_rows([headers])
+
     def test_expediciones_x_uses_noise_exception(self):
         with tempfile.TemporaryDirectory() as directory:
             result = self._comparison_fixture(Path(directory), {
